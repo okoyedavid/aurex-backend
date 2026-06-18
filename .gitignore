@@ -1,0 +1,15 @@
+/node_modules
+/.npm-cache/
+/app/generated/prisma/
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+
+src/data/
+
+.env
