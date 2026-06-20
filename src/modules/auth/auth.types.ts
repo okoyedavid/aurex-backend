@@ -12,4 +12,9 @@ export type LoginInput = {
   location: LocationMetadata;
 };
 
+export type RegisterInput = {
+  name: string;
+  password: string;
+  email: string;
+};
 export type LoginBody = z.infer<typeof loginSchema>["body"];

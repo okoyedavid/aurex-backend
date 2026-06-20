@@ -10,6 +10,7 @@ import { notFound } from "./middleware/not-found.middleware.js";
 import { globalLimiter } from "./middleware/rate-limit.middleware.js";
 import { requestContext } from "./middleware/request-context.middleware.js";
 import { healthRouter } from "./modules/health/health.route.js";
+import { statusRouter } from "./modules/health/status.route.js";
 import { authRouter } from "./modules/auth/auth.route.js";
 
 const app = express();
@@ -37,6 +38,7 @@ app.get("/", (_req, res) => {
 });
 
 app.use("/api/health", healthRouter);
+app.use("/status", statusRouter);
 app.use("/api/auth", authRouter);
 
 app.use(notFound);

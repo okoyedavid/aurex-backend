@@ -13,3 +13,6 @@
 src/data/
 
 .env
+.env.test
+
+dist/

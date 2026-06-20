@@ -2,18 +2,6 @@ import crypto from "crypto";
 import { TokenPayload } from "../../types/generic.js";
 import { JsonWebService } from "../../utils/jwt.js";
 
-// const createOtpToken = () => {
-//   const token = crypto.randomInt(100000, 1000000).toString();
-
-//   return {
-//     token,
-//     tokenHash: hashToken(token),
-//   };
-// };
-
-// const createHttpError = (message, statusCode) =>
-//   Object.assign(new Error(message), { statusCode });
-
 // const verifyGoogleIdToken = async (idToken) => {
 //   if (!idToken) {
 //     throw createHttpError("Google ID token is required", 400);
@@ -109,132 +97,6 @@ import { JsonWebService } from "../../utils/jwt.js";
 //   return payload;
 // };
 
-// const exchangeGitHubCode = async (code) => {
-//   if (!code) {
-//     throw createHttpError("GitHub authorization code is required", 400);
-//   }
-
-//   if (
-//     !env.githubClientId ||
-//     !env.githubClientSecret ||
-//     !env.githubCallbackUrl
-//   ) {
-//     throw createHttpError("GitHub OAuth is not configured", 500);
-//   }
-
-//   let response;
-
-//   try {
-//     response = await fetch("https://github.com/login/oauth/access_token", {
-//       method: "POST",
-//       headers: {
-//         Accept: "application/json",
-//         "Content-Type": "application/x-www-form-urlencoded",
-//       },
-//       body: new URLSearchParams({
-//         client_id: env.githubClientId,
-//         client_secret: env.githubClientSecret,
-//         code,
-//         redirect_uri: env.githubCallbackUrl,
-//       }),
-//     });
-//   } catch (_error) {
-//     throw createHttpError("Failed to exchange GitHub authorization code", 502);
-//   }
-
-//   if (!response.ok) {
-//     throw createHttpError("GitHub token exchange failed", 502);
-//   }
-
-//   const payload = await response.json();
-
-//   if (payload.error || !payload.access_token) {
-//     throw createHttpError("GitHub token exchange failed", 401);
-//   }
-
-//   return payload.access_token;
-// };
-
-// const fetchGitHubUser = async (accessToken) => {
-//   if (!accessToken) {
-//     throw createHttpError("GitHub access token is required", 400);
-//   }
-
-//   const headers = {
-//     Accept: "application/vnd.github+json",
-//     Authorization: `Bearer ${accessToken}`,
-//     "User-Agent": env.appName,
-//     "X-GitHub-Api-Version": "2022-11-28",
-//   };
-
-//   let userResponse;
-
-//   try {
-//     userResponse = await fetch("https://api.github.com/user", {
-//       headers,
-//     });
-//   } catch (_error) {
-//     throw createHttpError("Failed to fetch GitHub user profile", 502);
-//   }
-
-//   if (!userResponse.ok) {
-//     throw createHttpError("Failed to fetch GitHub user profile", 401);
-//   }
-
-//   const profile = await userResponse.json();
-
-//   let emailAddresses = [];
-
-//   try {
-//     const emailsResponse = await fetch("https://api.github.com/user/emails", {
-//       headers,
-//     });
-
-//     if (emailsResponse.ok) {
-//       emailAddresses = await emailsResponse.json();
-//     }
-//   } catch (_error) {
-//     emailAddresses = [];
-//   }
-
-//   const primaryVerifiedEmail = emailAddresses.find(
-//     (emailEntry) => emailEntry.primary && emailEntry.verified,
-//   );
-//   const firstVerifiedEmail = emailAddresses.find(
-//     (emailEntry) => emailEntry.verified,
-//   );
-//   const email =
-//     primaryVerifiedEmail?.email ?? firstVerifiedEmail?.email ?? profile.email;
-//   const emailVerified = emailAddresses.length
-//     ? emailAddresses.some(
-//         (emailEntry) => emailEntry.email === email && emailEntry.verified,
-//       )
-//     : Boolean(profile.email);
-
-//   return {
-//     provider: "github",
-//     providerUserId: profile.id?.toString(),
-//     email,
-//     emailVerified,
-//     name: profile.name || profile.login,
-//     username: profile.login,
-//     picture: profile.avatar_url,
-//   };
-// };
-
-// export {
-//   createOtpToken,
-//   exchangeGoogleCode,
-//   exchangeGitHubCode,
-//   fetchGitHubUser,
-//   hashToken,
-//   signAccessToken,
-//   signRefreshToken,
-//   verifyAccessToken,
-//   verifyGoogleIdToken,
-//   verifyRefreshToken,
-// };
-
 type TokenServiceDependencies = { jsonWebService: JsonWebService };
 
 export const createTokenService = ({
@@ -255,9 +117,19 @@ export const createTokenService = ({
   const hashToken = (token: string) =>
     crypto.createHash("sha256").update(token).digest("hex");
 
+  const createOtpToken = () => {
+    const token = crypto.randomInt(100000, 1000000).toString();
+
+    return {
+      token,
+      tokenHash: hashToken(token),
+    };
+  };
+
   return {
     signAccessToken,
     signRefreshToken,
+    createOtpToken,
     verifyAccessJwt,
     verifyRefreshJwt,
     hashToken,

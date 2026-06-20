@@ -4,9 +4,10 @@ import { asyncHandler } from "../../utils/async-handler.js";
 import type { AuditEventService } from "../audit-event/audit-event.service.js";
 import type { ErrorService } from "../error/error.service.js";
 import type { AuthService } from "./auth.service.js";
-import { loginSchema } from "./auth.validators.js";
+import { loginSchema, registerSchema } from "./auth.validators.js";
 
-type GetRequestContext = typeof import("../../services/ip-location.service.js").getRequestContext;
+type GetRequestContext =
+  typeof import("../../services/ip-location.service.js").getRequestContext;
 
 type SetAuthCookies = (
   res: Response,
@@ -87,7 +88,22 @@ const createAuthController = ({
     });
   });
 
-  return { login };
+  const register = asyncHandler(async (req, res) => {
+    const body = registerSchema.shape.body.parse(req.validatedBody);
+    const { name, email, password } = body;
+    const { user } = await authService.registerUser({
+      name,
+      email,
+      password,
+    });
+
+    return res.status(201).json({
+      message: "User registered successfully. Check your email for the OTP.",
+      user,
+    });
+  });
+
+  return { login, register };
 };
 
 export { createAuthController };

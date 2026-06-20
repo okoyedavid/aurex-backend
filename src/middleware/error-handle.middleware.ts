@@ -1,4 +1,4 @@
-import { recordApplicationError } from "../services/application-error.service.js";
+import { applicationErrorService } from "../modules/application-error/application-error.module.js";
 
 import { NextFunction, Request, Response } from "express";
 
@@ -23,7 +23,11 @@ const errorHandler = async (
 
   if (isServerError) {
     try {
-      await recordApplicationError({ error, req, statusCode });
+      await applicationErrorService.recordApplicationError({
+        error,
+        req,
+        statusCode,
+      });
     } catch (trackingError) {
       console.error("Failed to persist application error", trackingError);
     }

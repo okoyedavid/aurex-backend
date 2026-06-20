@@ -33,7 +33,6 @@ const userSchema = new mongoose.Schema(
     username: {
       type: String,
       required: false,
-      unique: true,
       lowercase: true,
       trim: true,
     },
@@ -76,6 +75,16 @@ const userSchema = new mongoose.Schema(
         delete obj.__v;
         return obj;
       },
+    },
+  },
+);
+
+userSchema.index(
+  { username: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      username: { $type: "string" },
     },
   },
 );

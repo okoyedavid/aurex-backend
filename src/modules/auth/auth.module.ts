@@ -11,6 +11,7 @@ import { errorService } from "../error/error.module.js";
 import { hashService } from "../../utils/hash.js";
 import { sessionService } from "../session/session.module.js";
 import { userRepository } from "../users/user.repository.js";
+import { verificationService } from "../verification/verification.module.js";
 import { createAuthController } from "./auth.controller.js";
 import { createAuthService } from "./auth.service.js";
 
@@ -18,6 +19,7 @@ export const authService = createAuthService({
   userRepository,
   hashService: hashService,
   sessionService,
+  verificationService,
   createHttpError,
 });
 

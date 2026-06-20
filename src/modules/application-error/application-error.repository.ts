@@ -1,7 +1,7 @@
 import {
   ApplicationError,
   CreateApplicationErrorPayload,
-} from "../models/application-error.model.js";
+} from "./application-error.model.js";
 
 const createApplicationError = (payload: CreateApplicationErrorPayload) =>
   ApplicationError.create(payload);
@@ -13,4 +13,9 @@ const markApplicationErrorResolved = (errorId: string) =>
     { new: true },
   );
 
-export { createApplicationError, markApplicationErrorResolved };
+export const applicationErrorRepository = {
+  createApplicationError,
+  markApplicationErrorResolved,
+};
+
+export type ApplicationErrorRepository = typeof applicationErrorRepository;
