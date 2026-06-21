@@ -1,6 +1,5 @@
 import mongoose, {
   HydratedDocument,
-  InferSchemaType,
   model,
   Types,
 } from "mongoose";
@@ -89,12 +88,19 @@ userSchema.index(
   },
 );
 
-export type UserSchemaType = InferSchemaType<typeof userSchema>;
+export type UserSchemaType = {
+  name: string;
+  avatar?: string | null;
+  bio?: string | null;
+  username?: string | null;
+  email: string;
+  emailVerifiedAt: Date | null;
+  status: "active" | "inactive";
+  password?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
 
-export type UserDocument = HydratedDocument<
-  UserSchemaType & {
-    _id: Types.ObjectId;
-  }
->;
+export type UserDocument = HydratedDocument<UserSchemaType>;
 
-export const User = model<UserDocument>("User", userSchema);
+export const User = model<UserSchemaType>("User", userSchema);

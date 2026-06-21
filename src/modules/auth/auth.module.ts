@@ -20,6 +20,7 @@ export const authService = createAuthService({
   hashService: hashService,
   sessionService,
   verificationService,
+  auditEventService,
   createHttpError,
 });
 

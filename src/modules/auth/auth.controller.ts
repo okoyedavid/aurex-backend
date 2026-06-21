@@ -4,7 +4,14 @@ import { asyncHandler } from "../../utils/async-handler.js";
 import type { AuditEventService } from "../audit-event/audit-event.service.js";
 import type { ErrorService } from "../error/error.service.js";
 import type { AuthService } from "./auth.service.js";
-import { loginSchema, registerSchema } from "./auth.validators.js";
+import {
+  changeEmailSchema,
+  loginSchema,
+  registerSchema,
+  resendEmailSchema,
+  verifyEmailChangeSchema,
+  verifyEmailSchema,
+} from "./auth.validators.js";
 
 type GetRequestContext =
   typeof import("../../services/ip-location.service.js").getRequestContext;
@@ -103,7 +110,88 @@ const createAuthController = ({
     });
   });
 
-  return { login, register };
+  const verifyEmailChange = asyncHandler(async (req, res) => {
+    const { requestMetadata } = await getRequestContext(req);
+
+    if (!req.user?.id || !req.user.sessionId || !req.user.userSessionId) {
+      throw createApiError(401, "Authentication required");
+    }
+
+    const body = verifyEmailChangeSchema.shape.body.parse(req.validatedBody);
+    const { otp } = body;
+
+    const updatedUser = await authService.verifyEmailChange({
+      otp,
+      userId: req.user.id,
+      sessionId: req.user.sessionId,
+      userSessionId: req.user.userSessionId,
+      requestMetadata,
+    });
+
+    return res.status(200).json({
+      message: "Email verified and changed successfully",
+      user: updatedUser,
+    });
+  });
+
+  const resendEmail = asyncHandler(async (req, res) => {
+    const { requestMetadata } = await getRequestContext(req);
+    const body = resendEmailSchema.shape.body.parse(req.validatedBody);
+    const { email } = body;
+
+    await authService.resendEmail({ email, requestMetadata });
+
+    return res.status(201).json({ message: "Email sent successfully!" });
+  });
+
+  const changeEmail = asyncHandler(async (req, res) => {
+    const { requestMetadata } = await getRequestContext(req);
+    if (!req.user?.id || !req.user.sessionId || !req.user.userSessionId) {
+      throw createApiError(401, "Authentication required");
+    }
+
+    const body = changeEmailSchema.shape.body.parse(req.validatedBody);
+
+    const { newEmail } = body;
+    await authService.sendNewEmailCode({
+      userId: req.user.id,
+      newEmail,
+      requestMetadata,
+      sessionId: req.user.sessionId,
+      userSessionId: req.user.userSessionId,
+    });
+
+    return res.status(201).json({
+      message: "OTP sent successfully. Check your new email for the OTP.",
+    });
+  });
+
+  const verifyEmail = asyncHandler(async (req, res) => {
+    const { requestMetadata } = await getRequestContext(req);
+
+    const body = verifyEmailSchema.shape.body.parse(req.validatedBody);
+    const { otp, email } = body;
+
+    const verifiedUser = await authService.verifyEmail({
+      requestMetadata,
+      email,
+      otp,
+    });
+
+    return res.status(200).json({
+      message: "Email verified successfully",
+      user: verifiedUser,
+    });
+  });
+
+  return {
+    login,
+    register,
+    verifyEmailChange,
+    verifyEmail,
+    resendEmail,
+    changeEmail,
+  };
 };
 
 export { createAuthController };

@@ -1,8 +1,6 @@
 import { env } from "../../config/env.js";
-import {
-  createHttpError as defaultCreateHttpError,
-  type HttpError,
-} from "../../utils/api-error.js";
+
+import { HttpError } from "../../utils/api-error.js";
 
 type EmailHttpErrorFactory = (message: string, statusCode: number) => HttpError;
 
@@ -47,7 +45,7 @@ type CreateEmailServiceDependencies = {
   fromEmail?: string;
   appName?: string;
   isProduction?: boolean;
-  createHttpError?: EmailHttpErrorFactory;
+  createHttpError: EmailHttpErrorFactory;
 };
 
 const getResendErrorMessage = (responseBody: ResendErrorResponse | null) => {
@@ -116,8 +114,8 @@ const createEmailService = ({
   fromEmail = env.EMAIL_FROM,
   appName = env.APP_NAME,
   isProduction = env.NODE_ENV === "production",
-  createHttpError = defaultCreateHttpError,
-}: CreateEmailServiceDependencies = {}) => {
+  createHttpError,
+}: CreateEmailServiceDependencies) => {
   const provider =
     emailProvider !== undefined
       ? emailProvider
@@ -164,7 +162,7 @@ const createEmailService = ({
 
     return provider.sendEmail({
       from: fromEmail,
-      to: "okoyedav7@gmail.com",
+      to,
       subject,
       text,
       html,
@@ -176,7 +174,5 @@ const createEmailService = ({
   };
 };
 
-const emailService = createEmailService();
-
-export { createEmailService, emailService };
+export { createEmailService };
 export type EmailService = ReturnType<typeof createEmailService>;

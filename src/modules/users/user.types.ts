@@ -1,5 +1,5 @@
 import type { HydratedDocument, Types } from "mongoose";
-import { User, type UserDocument } from "./user.models.js";
+import type { UserSchemaType } from "./user.models.js";
 
 export type CreateUserPayload = {
   email: string;
@@ -8,7 +8,7 @@ export type CreateUserPayload = {
 };
 
 export type UserWithPasswordDocument = HydratedDocument<
-  UserDocument & {
+  UserSchemaType & {
     password: string;
   }
 >;

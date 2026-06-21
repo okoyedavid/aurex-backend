@@ -1,5 +1,5 @@
 import { QueryOptions } from "mongoose";
-import { User, UserDocument } from "./user.models.js";
+import { User, type UserSchemaType } from "./user.models.js";
 import { CreateUserPayload, UserWithPasswordDocument } from "./user.types.js";
 
 const findUserById = (userId: string) => User.findById(userId);
@@ -17,7 +17,7 @@ const deleteUserById = (userId: string) => User.findByIdAndDelete(userId);
 
 const updateUserById = (
   userId: string,
-  payload: Partial<UserDocument>,
+  payload: Partial<UserSchemaType>,
   options: QueryOptions = {},
 ) =>
   User.findByIdAndUpdate(userId, payload, {

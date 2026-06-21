@@ -1,13 +1,13 @@
 import crypto from "crypto";
 import {
   LocationMetadata,
-  RecordSecurityEvent,
   RepositoryOptions,
   RequestMetadata,
 } from "../../repositories/repository-types.js";
 import { HashService } from "../../utils/hash.js";
 import { NotificationService } from "../notification/notification.service.js";
 import { AuditEventRepository } from "./audit-event.repository.js";
+import { RecordSecurityEvent } from "./audit-event.types.js";
 
 const defaultRequestMetadata: RequestMetadata = {
   requestId: null,
