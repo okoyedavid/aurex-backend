@@ -37,6 +37,7 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().min(1).optional(),
   EMAIL_FROM: z.string().min(1).optional(),
   APP_NAME: z.string().min(1).default("Aurex"),
+  EMAIL_DELIVERY_OVERRIDE_TO: z.string().email().optional(),
 });
 
 export const env = envSchema.parse(process.env);

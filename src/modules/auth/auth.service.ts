@@ -1,3 +1,5 @@
+import { RequestMetadata } from "../../repositories/repository-types.js";
+import { jsonWebService } from "../../utils/jwt.js";
 import { UserDocument } from "../users/user.models.js";
 import {
   LoginInput,
@@ -292,12 +294,84 @@ const createAuthService = ({
     });
   };
 
+  const refreshUserSession = async ({
+    refreshToken,
+  }: {
+    refreshToken: string;
+  }) => {
+    if (!refreshToken) {
+      throw createHttpError("Refresh token is required", 401);
+    }
+
+    const { payload, userSession } =
+      await sessionService.validateAuthSession(refreshToken);
+    const user = await userRepository.findUserById(payload.userId);
+
+    if (!user) {
+      await sessionService.revokeUserSession(userSession.userSessionId);
+      throw createHttpError("User not found", 404);
+    }
+
+    const rotatedSession = await sessionService.rotateLoginSession({
+      user,
+      userSession,
+      oldAuthSessionId: payload.sessionId,
+      oldRefreshToken: refreshToken,
+    });
+
+    return rotatedSession;
+  };
+
+  const logoutUser = async ({
+    refreshToken,
+    requestMetadata,
+  }: {
+    refreshToken: string;
+    requestMetadata: RequestMetadata;
+  }) => {
+    if (!refreshToken) {
+      throw createHttpError("Refresh token is required", 401);
+    }
+
+    const payload = jsonWebService.verifyRefreshToken(refreshToken);
+    const userSessionId =
+      payload.userSessionId ??
+      (payload.sessionId
+        ? await sessionService.getUserSessionIdFromAuthSessionId(
+            payload.sessionId,
+          )
+        : null);
+
+    if (payload?.userId) {
+      await sessionService.revokeUserSession(userSessionId);
+      await auditEventService.recordEventSafely({
+        eventType: "auth.logout",
+        category: "authentication",
+        outcome: "success",
+        userId: payload.userId,
+        userSessionId: payload.userSessionId,
+        authSessionId: payload.sessionId,
+        requestMetadata,
+        email: null,
+      });
+    }
+  };
+
+  const getCurrentUser = async (userId: string) => {
+    const user = await userRepository.findUserById(userId);
+
+    return { user };
+  };
+
   return {
     loginUser,
     registerUser,
+    logoutUser,
     verifyEmailChange,
     sendNewEmailCode,
+    getCurrentUser,
     verifyEmail,
+    refreshUserSession,
     resendEmail,
   };
 };

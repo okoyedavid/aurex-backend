@@ -7,14 +7,18 @@ import {
   registerSchema,
   resendEmailSchema,
   verifyEmailChangeSchema,
+  refreshSchema,
   verifyEmailSchema,
+  logoutSchema,
 } from "./auth.validators.js";
 import {
   emailDeliveryLimiter,
   otpLimiter,
+  refreshLimiter,
   loginIpLimiter,
   loginIdentityLimiter,
 } from "../../middleware/rate-limit.middleware.js";
+import { protect } from "../../middleware/auth.middleware.js";
 
 const authRouter = Router();
 
@@ -27,8 +31,18 @@ authRouter.post(
 );
 authRouter.post("/register", validate(registerSchema), authController.register);
 
+authRouter.post(
+  "/refresh",
+  refreshLimiter,
+  validate(refreshSchema),
+  authController.refresh,
+);
+
+authRouter.post("/logout", validate(logoutSchema), authController.logout);
+
 authRouter.patch(
   "/change-email",
+  protect,
   otpLimiter,
   validate(verifyEmailChangeSchema),
   authController.verifyEmailChange,
@@ -36,6 +50,7 @@ authRouter.patch(
 
 authRouter.post(
   "/change-email",
+  protect,
   emailDeliveryLimiter,
   validate(changeEmailSchema),
   authController.changeEmail,
@@ -55,21 +70,6 @@ authRouter.post(
   authController.resendEmail,
 );
 
-// authRouter.patch(
-//   "/change-email",
-//   protect,
-//   otpLimiter,
-//   validate(verifyEmailChangeSchema),
-//   verifyEmailChange,
-// );
-// authRouter.post(
-//   "/change-email",
-//   protect,
-//   emailDeliveryLimiter,
-//   validate(changeEmailSchema),
-//   changeEmail,
-// );
-
 // authRouter.get("/google", redirectToGoogle);
 // authRouter.get("/google/callback", loginWithGoogleCallback);
 // authRouter.get("/github", redirectToGitHub);
@@ -83,7 +83,6 @@ authRouter.post(
 //   resetPassword,
 // );
 
-// authRouter.post("/logout", validate(logoutSchema), logout);
 // authRouter.get("/me", protect, getMe);
 // authRouter.get("/me/sessions", protect, getMySessions);
 // authRouter.get(

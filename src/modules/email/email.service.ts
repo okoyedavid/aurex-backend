@@ -43,6 +43,7 @@ type CreateEmailServiceDependencies = {
   emailProvider?: EmailProvider | null;
   resendApiKey?: string;
   fromEmail?: string;
+  deliveryOverrideTo?: string;
   appName?: string;
   isProduction?: boolean;
   createHttpError: EmailHttpErrorFactory;
@@ -112,6 +113,7 @@ const createEmailService = ({
   emailProvider,
   resendApiKey = env.RESEND_API_KEY,
   fromEmail = env.EMAIL_FROM,
+  deliveryOverrideTo = env.EMAIL_DELIVERY_OVERRIDE_TO,
   appName = env.APP_NAME,
   isProduction = env.NODE_ENV === "production",
   createHttpError,
@@ -162,7 +164,7 @@ const createEmailService = ({
 
     return provider.sendEmail({
       from: fromEmail,
-      to,
+      to: deliveryOverrideTo ?? to,
       subject,
       text,
       html,

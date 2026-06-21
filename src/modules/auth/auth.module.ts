@@ -5,7 +5,7 @@ import {
   getErrorStatusCode,
 } from "../../utils/api-error.js";
 import { getRequestContext } from "../../services/ip-location.service.js";
-import { setAuthCookies } from "../../utils/cookie.js";
+import { setAuthCookies, clearAuthCookies } from "../../utils/cookie.js";
 import { auditEventService } from "../audit-event/audit-event.module.js";
 import { errorService } from "../error/error.module.js";
 import { hashService } from "../../utils/hash.js";
@@ -28,6 +28,7 @@ export const authController = createAuthController({
   authService,
   errorService,
   auditEventService,
+  clearAuthCookies,
   getRequestContext,
   setAuthCookies,
   createApiError: (statusCode, message) => new ApiError(statusCode, message),

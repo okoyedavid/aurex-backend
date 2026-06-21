@@ -16,7 +16,8 @@ export type RecordSecurityEvent = {
     | "account.email_change.succeeded"
     | "account.email_verification.failed"
     | "account.email_verification.requested"
-    | "account.email_change.requested";
+    | "account.email_change.requested"
+    | "auth.logout";
 
   category: "security" | "authentication" | "account";
   outcome: "blocked" | "failure" | "success";

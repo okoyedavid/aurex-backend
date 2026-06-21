@@ -21,12 +21,15 @@ type SetAuthCookies = (
   tokens: { accessToken: string; refreshToken: string },
 ) => void;
 
+type ClearAuthCookies = (res: Response) => void;
+
 type AuthControllerDependencies = {
   authService: AuthService;
   errorService: ErrorService;
   auditEventService: AuditEventService;
   getRequestContext: GetRequestContext;
   setAuthCookies: SetAuthCookies;
+  clearAuthCookies: ClearAuthCookies;
   createApiError: (statusCode: number, message: string) => ApiError;
   getErrorStatusCode: (error: unknown) => number;
   getErrorMessage: (error: unknown) => string;
@@ -35,6 +38,7 @@ type AuthControllerDependencies = {
 const createAuthController = ({
   authService,
   errorService,
+  clearAuthCookies,
   auditEventService,
   getRequestContext,
   setAuthCookies,
@@ -107,6 +111,42 @@ const createAuthController = ({
     return res.status(201).json({
       message: "User registered successfully. Check your email for the OTP.",
       user,
+    });
+  });
+
+  const refresh = asyncHandler(async (req, res) => {
+    const refreshToken = req.cookies?.refreshToken;
+
+    const {
+      accessToken,
+      refreshToken: newRefreshToken,
+      userSession,
+    } = await authService.refreshUserSession({
+      refreshToken,
+    });
+
+    setAuthCookies(res, {
+      accessToken,
+      refreshToken: newRefreshToken,
+    });
+
+    return res.status(200).json({
+      message: "Session refreshed successfully",
+      userSession,
+    });
+  });
+
+  const logout = asyncHandler(async (req, res) => {
+    const { requestMetadata } = await getRequestContext(req);
+
+    const refreshToken = req.cookies?.refreshToken;
+
+    await authService.logoutUser({ refreshToken, requestMetadata });
+
+    clearAuthCookies(res);
+
+    return res.status(200).json({
+      message: "Logout successful",
     });
   });
 
@@ -184,9 +224,23 @@ const createAuthController = ({
     });
   });
 
+  const getMe = asyncHandler(async (req, res) => {
+    if (!req.user?.id) {
+      throw createApiError(401, "Authentication required");
+    }
+    const { user } = await authService.getCurrentUser(req.user.id);
+
+    return res.status(200).json({
+      user,
+    });
+  });
+
   return {
     login,
     register,
+    getMe,
+    logout,
+    refresh,
     verifyEmailChange,
     verifyEmail,
     resendEmail,
