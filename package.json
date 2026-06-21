@@ -5,6 +5,8 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "download:maxmind": "bash scripts/download-maxmind.sh",
+    "render-build": "npm run download:maxmind && npm run build",
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "cross-env NODE_ENV=test vitest",
