@@ -17,9 +17,11 @@ export type RecordSecurityEvent = {
     | "account.email_verification.failed"
     | "account.email_verification.requested"
     | "account.email_change.requested"
-    | "auth.logout";
+    | "auth.logout"
+    | "auth.sessions.revoked_all_others"
+    | "auth.session.revoked";
 
-  category: "security" | "authentication" | "account";
+  category: "security" | "authentication" | "account" | "session";
   outcome: "blocked" | "failure" | "success";
   severity?: NotificationSeverity;
   userId: string | null;
@@ -36,6 +38,7 @@ export type RecordSecurityEvent = {
   metadata?: {
     method: string;
     path: string;
+    revokedCount?: string | number;
   };
   requestMetadata?: Partial<RequestMetadata>;
   location?: Partial<LocationMetadata>;

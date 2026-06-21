@@ -22,6 +22,8 @@ import { protect } from "../../middleware/auth.middleware.js";
 
 const authRouter = Router();
 
+authRouter.get("/me", protect, authController.getMe);
+
 authRouter.post(
   "/login",
   loginIpLimiter,
@@ -74,7 +76,7 @@ authRouter.post(
 // authRouter.get("/google/callback", loginWithGoogleCallback);
 // authRouter.get("/github", redirectToGitHub);
 // authRouter.get("/github/callback", loginWithGitHub);
-// authRouter.post("/refresh", refreshLimiter, validate(refreshSchema), refresh);
+
 // authRouter.post(
 //   "/reset-password",
 //   protect,
@@ -83,8 +85,6 @@ authRouter.post(
 //   resetPassword,
 // );
 
-// authRouter.get("/me", protect, getMe);
-// authRouter.get("/me/sessions", protect, getMySessions);
 // authRouter.get(
 //   "/me/audit-events",
 //   protect,
@@ -109,20 +109,7 @@ authRouter.post(
 //   validate(readNotificationSchema),
 //   readNotification,
 // );
-// authRouter.delete(
-//   "/me/sessions",
-//   protect,
-//   sensitiveActionLimiter,
-//   validate(revokeOtherSessionsSchema),
-//   revokeOtherSessions,
-// );
-// authRouter.delete(
-//   "/me/sessions/:userSessionId",
-//   protect,
-//   sensitiveActionLimiter,
-//   validate(revokeSessionSchema),
-//   revokeSession,
-// );
+
 // authRouter.patch(
 //   "/me",
 //   protect,

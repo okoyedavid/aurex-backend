@@ -12,7 +12,8 @@ import {
   MintSession,
   SessionServiceDependencies,
 } from "./session.types.js";
-import { sessionService } from "./session.module.js";
+import { auditEventService } from "../audit-event/audit-event.module.js";
+import { UserSessionDocument } from "../user-session/user-session.model.js";
 
 const defaultRequestMetadata: RequestMetadata = {
   requestId: null,
@@ -513,7 +514,121 @@ const createSessionService = ({
     return userSessionRepository.findActiveUserSessionById(userSessionId);
   };
 
+  const getUserSessions = async (userId: string) => {
+    if (!userId) {
+      throw createHttpError("User id is required", 400);
+    }
+
+    return userSessionRepository.findUserSessionsByUserId(userId);
+  };
+
+  const revokeSession = async ({
+    userSessionId,
+    sessionId,
+    userId,
+    requestMetadata,
+  }: {
+    userSessionId: string;
+    sessionId: string;
+    requestMetadata: RequestMetadata;
+    userId: string;
+  }) => {
+    const revokedSession = await revokeUserSession(userSessionId);
+
+    await auditEventService.recordEventSafely({
+      eventType: "auth.session.revoked",
+      category: "session",
+      outcome: "success",
+      severity: "warning",
+      userId,
+      userSessionId,
+      authSessionId: sessionId,
+      requestMetadata,
+      email: null,
+      notification: {
+        title: "Session revoked",
+        message: "A login session was revoked from your account.",
+        severity: "warning",
+      },
+    });
+
+    return { revokedSession };
+  };
+
+  const revokeOtherUserSessions = async ({
+    userId,
+    currentUserSessionId,
+    mongoSession = null,
+    sessionId,
+    method,
+    path,
+    requestMetadata,
+  }: {
+    userId: string;
+    currentUserSessionId: string;
+    mongoSession?: ClientSession | null;
+
+    sessionId: string;
+    requestMetadata: RequestMetadata;
+    method: string;
+    path: string;
+  }) => {
+    if (!userId || !currentUserSessionId) {
+      throw createHttpError(
+        "User id and current user session id are required",
+        400,
+      );
+    }
+
+    const sessions = await userSessionRepository.findUserSessionsByUserId(
+      userId,
+      mongoSession ? { session: mongoSession } : {},
+    );
+    const sessionsToRevoke = sessions.filter(
+      (session: UserSessionDocument) =>
+        session.userSessionId !== currentUserSessionId &&
+        session.revokedAt === null,
+    );
+
+    await userSessionRepository.revokeUserSessionsByUserId(
+      userId,
+      currentUserSessionId,
+      mongoSession ? { session: mongoSession } : {},
+    );
+
+    for (const session of sessionsToRevoke) {
+      await authSessionRepository.revokeAuthSessionsByUserSessionId(
+        session.userSessionId,
+        mongoSession ? { session: mongoSession } : {},
+      );
+    }
+
+    await auditEventService.recordEventSafely({
+      eventType: "auth.sessions.revoked_all_others",
+      category: "session",
+      outcome: "success",
+      severity: "warning",
+      userId,
+      userSessionId: currentUserSessionId,
+      email: null,
+      authSessionId: sessionId,
+      requestMetadata,
+      metadata: { method, path, revokedCount: sessionsToRevoke.length },
+      notification: {
+        title: "Other sessions revoked",
+        message: `${sessionsToRevoke.length} other login sessions were revoked.`,
+        severity: "warning",
+      },
+    });
+
+    return {
+      revokedCount: sessionsToRevoke.length,
+    };
+  };
   return {
+    revokeOtherUserSessions,
+    getUserSessions,
+    revokeSession,
     createLoginSession,
     getActiveUserSessionById,
     getUserSessionById,
@@ -599,53 +714,6 @@ export { createSessionService };
 //   });
 
 //   return { authSession: newAuthSession, userSession };
-// };
-
-// const revokeOtherUserSessions = async ({
-//   userId,
-//   currentUserSessionId,
-//   mongoSession = null,
-// }) => {
-//   if (!userId || !currentUserSessionId) {
-//     throw createHttpError(
-//       "User id and current user session id are required",
-//       400,
-//     );
-//   }
-
-//   const sessions = await findUserSessionsByUserId(
-//     userId,
-//     mongoSession ? { session: mongoSession } : {},
-//   );
-//   const sessionsToRevoke = sessions.filter(
-//     (session) =>
-//       session.userSessionId !== currentUserSessionId && session.revokedAt === null,
-//   );
-
-//   await revokeUserSessionsByUserId(
-//     userId,
-//     currentUserSessionId,
-//     mongoSession ? { session: mongoSession } : {},
-//   );
-
-//   for (const session of sessionsToRevoke) {
-//     await revokeAuthSessionsByUserSessionId(
-//       session.userSessionId,
-//       mongoSession ? { session: mongoSession } : {},
-//     );
-//   }
-
-//   return {
-//     revokedCount: sessionsToRevoke.length,
-//   };
-// };
-
-// const getUserSessions = async (userId) => {
-//   if (!userId) {
-//     throw createHttpError("User id is required", 400);
-//   }
-
-//   return findUserSessionsByUserId(userId);
 // };
 
 // export {

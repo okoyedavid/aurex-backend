@@ -122,26 +122,10 @@ const logoutSchema = z.object({
   query: z.object({}),
 });
 
-const revokeSessionSchema = z.object({
-  body: z.object({}).optional().default({}),
-  params: z.object({
-    userSessionId: z.string().uuid(),
-  }),
-  query: z.object({}),
-});
-
-const revokeOtherSessionsSchema = z.object({
-  body: z.object({}).optional().default({}),
-  params: z.object({}),
-  query: z.object({}),
-});
-
 export {
   googleLoginSchema,
   loginSchema,
   logoutSchema,
-  revokeOtherSessionsSchema,
-  revokeSessionSchema,
   refreshSchema,
   registerSchema,
   changeEmailSchema,

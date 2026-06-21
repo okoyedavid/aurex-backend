@@ -1,5 +1,10 @@
 type SystemState = "healthy" | "degraded" | "down";
-type DatabaseState = "connected" | "connecting" | "disconnecting" | "disconnected" | "unknown";
+type DatabaseState =
+  | "connected"
+  | "connecting"
+  | "disconnecting"
+  | "disconnected"
+  | "unknown";
 
 export type SystemStatusPayload = {
   service: "Aurex API";
@@ -224,8 +229,7 @@ const createHealthService = ({
     .hud::before {
       inset: -7%;
       background:
-        radial-gradient(circle, rgba(65, 244, 255, 0.2), transparent 56%),
-        conic-gradient(from 0deg, transparent 0 8%, rgba(65, 244, 255, 0.52) 8% 11%, transparent 11% 24%, rgba(65, 244, 255, 0.68) 24% 28%, transparent 28% 100%);
+        radial-gradient(circle, rgba(65, 244, 255, 0.2), transparent 56%);
       filter: blur(1px);
       opacity: 0.9;
       animation: spin 8s linear infinite, glow 2.8s ease-in-out infinite;
@@ -488,9 +492,9 @@ const createHealthService = ({
         </div>
 
         <div class="copy">
-          <span class="badge"><span class="dot"></span>${escapeHtml(statusLabel)}</span>
+          <span class="badge"><span class="dot"></span>All systems ${escapeHtml(statusLabel)}</span>
           <h1>Welcome.</h1>
-          <p class="summary">Here is the backend status for ${escapeHtml(payload.service)}.</p>
+          <p class="summary">Backend status for ${escapeHtml(payload.service)}.</p>
 
           <div class="grid">
             <article class="metric">
