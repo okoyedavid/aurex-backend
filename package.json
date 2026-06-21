@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "download:maxmind": "bash scripts/download-maxmind.sh",
-    "render-build": "npm ci && npm run download:maxmind && npm run build",
+    "render-build": "npm ci --include=dev && npm run download:maxmind && npm run build",
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "cross-env NODE_ENV=test vitest",
