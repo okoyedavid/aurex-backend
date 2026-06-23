@@ -1,8 +1,4 @@
-import mongoose, {
-  HydratedDocument,
-  model,
-  Types,
-} from "mongoose";
+import mongoose, { HydratedDocument, model, Types } from "mongoose";
 
 type UserJsonTransform = {
   _id?: Types.ObjectId;
@@ -60,6 +56,12 @@ const userSchema = new mongoose.Schema(
       minlength: 8,
       select: false,
     },
+    preferences: {
+      twoFactorEnabled: {
+        type: Boolean,
+        default: false,
+      },
+    },
   },
   {
     timestamps: true,
@@ -97,6 +99,9 @@ export type UserSchemaType = {
   emailVerifiedAt: Date | null;
   status: "active" | "inactive";
   password?: string;
+  preferences: {
+    twoFactorEnabled: boolean;
+  };
   createdAt: Date;
   updatedAt: Date;
 };

@@ -7,6 +7,7 @@ import { loginSchema } from "./auth.validators.js";
 import { UserRepository } from "../users/user.repository.js";
 import { SessionService } from "../session/session.service.js";
 import { HashService } from "../../utils/hash.js";
+import { WithTransaction } from "../../utils/mongooose-transactions.js";
 import { VerificationService } from "../verification/verification.service.js";
 import { HttpError } from "../../utils/api-error.js";
 import { AuditEventService } from "../audit-event/audit-event.service.js";
@@ -30,17 +31,16 @@ export type ResendEmail = {
   requestMetadata: RequestMetadata;
 };
 
-export type VerifyEmailChangeInput = {
-  otp: string;
-  userId: string;
-  sessionId: string;
-  userSessionId: string;
+export type ForgotPasswordInput = {
+  email: string;
   requestMetadata: RequestMetadata;
 };
 
-export type ValidateEmailChange = {
-  userId: string;
-  token: string;
+export type ResetPasswordInput = {
+  email: string;
+  otp: string;
+  newPassword: string;
+  requestMetadata: RequestMetadata;
 };
 
 export type VerifyEmail = {
@@ -49,20 +49,13 @@ export type VerifyEmail = {
   requestMetadata: RequestMetadata;
 };
 
-export type SendNewEmailCode = {
-  userId: string;
-  newEmail: string;
-  requestMetadata: RequestMetadata;
-  userSessionId: string;
-  sessionId: string;
-};
-
 export type AuthServiceDependencies = {
   userRepository: UserRepository;
   sessionService: SessionService;
   hashService: HashService;
   verificationService: VerificationService;
   auditEventService: AuditEventService;
+  withTransaction: WithTransaction;
   createHttpError: (message: string, statusCode: number) => HttpError;
   //   authProviderRepository: AuthProviderRepository;
   //   tokenService: TokenService;

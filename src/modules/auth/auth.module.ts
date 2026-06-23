@@ -9,6 +9,7 @@ import { setAuthCookies, clearAuthCookies } from "../../utils/cookie.js";
 import { auditEventService } from "../audit-event/audit-event.module.js";
 import { errorService } from "../error/error.module.js";
 import { hashService } from "../../utils/hash.js";
+import { withTransaction } from "../../utils/mongooose-transactions.js";
 import { sessionService } from "../session/session.module.js";
 import { userRepository } from "../users/user.repository.js";
 import { verificationService } from "../verification/verification.module.js";
@@ -21,6 +22,7 @@ export const authService = createAuthService({
   sessionService,
   verificationService,
   auditEventService,
+  withTransaction,
   createHttpError,
 });
 

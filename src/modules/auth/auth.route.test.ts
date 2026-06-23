@@ -42,7 +42,7 @@ describe("POST /api/auth/register", () => {
       ]),
     );
 
-    const changeEmailRes = await agent.post("/api/auth/change-email").send({
+    const changeEmailRes = await agent.post("/api/me/email/change").send({
       newEmail: `new-${Date.now()}@test.local`,
     });
 
@@ -51,11 +51,23 @@ describe("POST /api/auth/register", () => {
     const refreshRes = await agent.post("/api/auth/refresh").send({});
     expect(refreshRes.status).toBe(200);
 
+    const updateres = await agent
+      .patch("/api/me")
+      .send({ name: "david", username: "david11", bio: "hello there" });
+
+    expect(updateres.status).toBe(200);
+
+    const changePasswordRes = await agent
+      .patch("/api/me/password")
+      .send({ newPassword: "Hellothere8*", currentPassword: password });
+
+    expect(changePasswordRes.status).toBe(200);
+
     // logout uses refreshToken cookie
     const logoutRes = await agent.post("/api/auth/logout").send({});
     expect(logoutRes.status).toBe(200);
 
-    const protectedRes = await agent.post("/api/auth/change-email").send({
+    const protectedRes = await agent.post("/api/me/email/change").send({
       newEmail: `after-logout-${Date.now()}@test.local`,
     });
 

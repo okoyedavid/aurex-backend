@@ -67,17 +67,25 @@ const deleteProviderSchema = z.object({
   query: z.object({}),
 });
 
-const changeEmailSchema = z.object({
+const forgotPasswordSchema = z.object({
   body: z.object({
-    newEmail: z.string().trim().toLowerCase().email(),
+    email: z.string().trim().toLowerCase().email(),
   }),
   params: z.object({}),
   query: z.object({}),
 });
 
-const verifyEmailChangeSchema = z.object({
+const resetPasswordSchema = z.object({
   body: z.object({
+    email: z.string().trim().toLowerCase().email(),
     otp: z.string().trim().length(6).regex(/^\d+$/, "OTP must be numeric"),
+    newPassword: z
+      .string()
+      .min(8)
+      .max(72)
+      .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+      .regex(/[a-z]/, "Password must contain at least one lowercase letter")
+      .regex(/[0-9]/, "Password must contain at least one number"),
   }),
   params: z.object({}),
   query: z.object({}),
@@ -123,14 +131,14 @@ const logoutSchema = z.object({
 });
 
 export {
+  forgotPasswordSchema,
   googleLoginSchema,
   loginSchema,
   logoutSchema,
   refreshSchema,
   registerSchema,
-  changeEmailSchema,
+  resetPasswordSchema,
   resendEmailSchema,
-  verifyEmailChangeSchema,
   verifyEmailSchema,
   deleteProviderSchema,
   passwordResetSchema,

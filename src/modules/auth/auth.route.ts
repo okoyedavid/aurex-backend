@@ -2,11 +2,11 @@ import { Router } from "express";
 import { validate } from "../../middleware/validate-middleware.js";
 import { authController } from "./auth.module.js";
 import {
-  changeEmailSchema,
+  forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
   resendEmailSchema,
-  verifyEmailChangeSchema,
   refreshSchema,
   verifyEmailSchema,
   logoutSchema,
@@ -42,22 +42,6 @@ authRouter.post(
 
 authRouter.post("/logout", validate(logoutSchema), authController.logout);
 
-authRouter.patch(
-  "/change-email",
-  protect,
-  otpLimiter,
-  validate(verifyEmailChangeSchema),
-  authController.verifyEmailChange,
-);
-
-authRouter.post(
-  "/change-email",
-  protect,
-  emailDeliveryLimiter,
-  validate(changeEmailSchema),
-  authController.changeEmail,
-);
-
 authRouter.post(
   "/verify-email",
   otpLimiter,
@@ -70,6 +54,20 @@ authRouter.post(
   emailDeliveryLimiter,
   validate(resendEmailSchema),
   authController.resendEmail,
+);
+
+authRouter.post(
+  "/password/forgot",
+  emailDeliveryLimiter,
+  validate(forgotPasswordSchema),
+  authController.forgotPassword,
+);
+
+authRouter.patch(
+  "/password/reset",
+  otpLimiter,
+  validate(resetPasswordSchema),
+  authController.resetPassword,
 );
 
 // authRouter.get("/google", redirectToGoogle);

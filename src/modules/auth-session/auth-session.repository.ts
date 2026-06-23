@@ -51,11 +51,27 @@ const revokeAuthSessionsByUserSessionId = (
     options,
   );
 
+const revokeAuthSessionsByUserId = (
+  userId: string,
+  options: RepositoryOptions = {},
+) =>
+  AuthSession.updateMany(
+    {
+      userId,
+      revokedAt: null,
+    },
+    {
+      revokedAt: new Date(),
+    },
+    options,
+  );
+
 export const authSessionRepository = {
   createAuthSession,
   findAuthSessionById,
   findAuthSessionsByUserId,
   findAuthSessionsByUserSessionId,
+  revokeAuthSessionsByUserId,
   revokeAuthSessionsByUserSessionId,
   updateAuthSessionById,
 };

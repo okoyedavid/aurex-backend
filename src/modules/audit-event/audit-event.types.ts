@@ -17,6 +17,9 @@ export type RecordSecurityEvent = {
     | "account.email_verification.failed"
     | "account.email_verification.requested"
     | "account.email_change.requested"
+    | "account.password_reset.requested"
+    | "account.password_reset.failed"
+    | "account.password_reset.succeeded"
     | "auth.logout"
     | "auth.sessions.revoked_all_others"
     | "auth.session.revoked";
@@ -34,10 +37,11 @@ export type RecordSecurityEvent = {
     | "invalid_credentials"
     | "login_failed"
     | "invalid_or_expired_verification_code"
+    | "user_not_found"
     | null;
   metadata?: {
-    method: string;
-    path: string;
+    method?: string;
+    path?: string;
     revokedCount?: string | number;
   };
   requestMetadata?: Partial<RequestMetadata>;

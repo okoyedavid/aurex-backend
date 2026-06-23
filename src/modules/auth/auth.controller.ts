@@ -5,11 +5,11 @@ import type { AuditEventService } from "../audit-event/audit-event.service.js";
 import type { ErrorService } from "../error/error.service.js";
 import type { AuthService } from "./auth.service.js";
 import {
-  changeEmailSchema,
+  forgotPasswordSchema,
   loginSchema,
   registerSchema,
+  resetPasswordSchema,
   resendEmailSchema,
-  verifyEmailChangeSchema,
   verifyEmailSchema,
 } from "./auth.validators.js";
 
@@ -150,30 +150,6 @@ const createAuthController = ({
     });
   });
 
-  const verifyEmailChange = asyncHandler(async (req, res) => {
-    const { requestMetadata } = await getRequestContext(req);
-
-    if (!req.user?.id || !req.user.sessionId || !req.user.userSessionId) {
-      throw createApiError(401, "Authentication required");
-    }
-
-    const body = verifyEmailChangeSchema.shape.body.parse(req.validatedBody);
-    const { otp } = body;
-
-    const updatedUser = await authService.verifyEmailChange({
-      otp,
-      userId: req.user.id,
-      sessionId: req.user.sessionId,
-      userSessionId: req.user.userSessionId,
-      requestMetadata,
-    });
-
-    return res.status(200).json({
-      message: "Email verified and changed successfully",
-      user: updatedUser,
-    });
-  });
-
   const resendEmail = asyncHandler(async (req, res) => {
     const { requestMetadata } = await getRequestContext(req);
     const body = resendEmailSchema.shape.body.parse(req.validatedBody);
@@ -184,25 +160,32 @@ const createAuthController = ({
     return res.status(201).json({ message: "Email sent successfully!" });
   });
 
-  const changeEmail = asyncHandler(async (req, res) => {
+  const forgotPassword = asyncHandler(async (req, res) => {
     const { requestMetadata } = await getRequestContext(req);
-    if (!req.user?.id || !req.user.sessionId || !req.user.userSessionId) {
-      throw createApiError(401, "Authentication required");
-    }
+    const body = forgotPasswordSchema.shape.body.parse(req.validatedBody);
+    const { email } = body;
 
-    const body = changeEmailSchema.shape.body.parse(req.validatedBody);
-
-    const { newEmail } = body;
-    await authService.sendNewEmailCode({
-      userId: req.user.id,
-      newEmail,
-      requestMetadata,
-      sessionId: req.user.sessionId,
-      userSessionId: req.user.userSessionId,
-    });
+    await authService.forgotPassword({ email, requestMetadata });
 
     return res.status(201).json({
-      message: "OTP sent successfully. Check your new email for the OTP.",
+      message: "Password reset code sent successfully",
+    });
+  });
+
+  const resetPassword = asyncHandler(async (req, res) => {
+    const { requestMetadata } = await getRequestContext(req);
+    const body = resetPasswordSchema.shape.body.parse(req.validatedBody);
+    const { email, otp, newPassword } = body;
+
+    await authService.resetPassword({
+      email,
+      otp,
+      newPassword,
+      requestMetadata,
+    });
+
+    return res.status(200).json({
+      message: "Password reset successfully",
     });
   });
 
@@ -239,12 +222,12 @@ const createAuthController = ({
     login,
     register,
     getMe,
+    forgotPassword,
     logout,
     refresh,
-    verifyEmailChange,
+    resetPassword,
     verifyEmail,
     resendEmail,
-    changeEmail,
   };
 };
 

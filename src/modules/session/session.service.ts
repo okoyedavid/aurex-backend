@@ -155,10 +155,12 @@ const createSessionService = ({
     user,
     requestMetadata = defaultRequestMetadata,
     location = defaultLocation,
+    mongoSession = null,
   }: {
     user: UserDocument;
     location?: LocationMetadata;
     requestMetadata?: RequestMetadata;
+    mongoSession?: ClientSession | null;
   }) => {
     const userSessionId = crypto.randomUUID();
     const authSessionId = crypto.randomUUID();
@@ -168,14 +170,35 @@ const createSessionService = ({
       authSessionId,
     });
 
-    const { userSession } = await createLoginSessionAtomically({
-      userId: user.id,
-      userSessionId,
-      authSessionId,
-      refreshToken,
-      requestMetadata,
-      location,
-    });
+    const { userSession } = mongoSession
+      ? await (async () => {
+          const userSession = await createUserSessionRecord({
+            userId: user.id,
+            userSessionId,
+            currentAuthSessionId: authSessionId,
+            requestMetadata,
+            location,
+            mongoSession,
+          });
+
+          await createAuthSessionRecord({
+            userId: user.id,
+            userSessionId,
+            sessionId: authSessionId,
+            refreshToken,
+            mongoSession,
+          });
+
+          return { userSession };
+        })()
+      : await createLoginSessionAtomically({
+          userId: user.id,
+          userSessionId,
+          authSessionId,
+          refreshToken,
+          requestMetadata,
+          location,
+        });
 
     return { accessToken, refreshToken, userSession };
   };
@@ -522,6 +545,34 @@ const createSessionService = ({
     return userSessionRepository.findUserSessionsByUserId(userId);
   };
 
+  const revokeAllUserSessions = async (
+    userId: string,
+    mongoSession: ClientSession | null = null,
+  ) => {
+    if (!userId) {
+      throw createHttpError("User id is required", 400);
+    }
+
+    const revokeAll = async (activeMongoSession: ClientSession) => {
+      const userSessionsResult =
+        await userSessionRepository.revokeUserSessionsByUserId(userId, null, {
+          session: activeMongoSession,
+        });
+
+      await authSessionRepository.revokeAuthSessionsByUserId(userId, {
+        session: activeMongoSession,
+      });
+
+      return {
+        revokedCount: userSessionsResult.modifiedCount,
+      };
+    };
+
+    return mongoSession
+      ? revokeAll(mongoSession)
+      : withTransaction((activeMongoSession) => revokeAll(activeMongoSession));
+  };
+
   const revokeSession = async ({
     userSessionId,
     sessionId,
@@ -627,6 +678,7 @@ const createSessionService = ({
   };
   return {
     revokeOtherUserSessions,
+    revokeAllUserSessions,
     getUserSessions,
     revokeSession,
     createLoginSession,

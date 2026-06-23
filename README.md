@@ -46,8 +46,8 @@ POST /api/auth/refresh
 POST /api/auth/logout
 POST /api/auth/verify-email
 POST /api/auth/resend-email
-POST /api/auth/change-email
-PATCH /api/auth/change-email
+POST /api/me/email/change
+PATCH /api/me/email/change
 ```
 
 Sessions:
@@ -179,8 +179,8 @@ Requires auth cookies. Returns the current logged-in user.
 ### Change Email
 
 ```http
-POST /api/auth/change-email
-PATCH /api/auth/change-email
+POST /api/me/email/change
+PATCH /api/me/email/change
 ```
 
 `POST` sends an OTP to the new email address. `PATCH` verifies the OTP and updates the user email. Both routes require authentication.

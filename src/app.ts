@@ -13,6 +13,7 @@ import { healthRouter } from "./modules/health/health.route.js";
 import { statusRouter } from "./modules/health/status.route.js";
 import { authRouter } from "./modules/auth/auth.route.js";
 import { sessionRouter } from "./modules/session/session.route.js";
+import { accountRouter } from "./modules/account/account.route.js";
 
 const app = express();
 
@@ -47,6 +48,7 @@ app.use("/api/health", healthRouter);
 app.use("/status", statusRouter);
 app.use("/api/auth", authRouter);
 app.use("/api", sessionRouter);
+app.use("/api", accountRouter);
 
 app.use(notFound);
 app.use(errorHandler);
