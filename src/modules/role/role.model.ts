@@ -1,6 +1,6 @@
 import mongoose, { InferSchemaType, model } from "mongoose";
 
-const allowedPermissions = [
+export const allowedPermissions = [
   "business:update",
   "members:invite",
   "members:remove",
@@ -21,7 +21,7 @@ const allowedPermissions = [
 
 type Permission = (typeof allowedPermissions)[number];
 
-const systemRolePermissions: Record<string, Permission[] | ["*"]> = {
+export const systemRolePermissions = {
   owner: [...allowedPermissions],
   admin: [
     "members:invite",
@@ -48,7 +48,8 @@ const systemRolePermissions: Record<string, Permission[] | ["*"]> = {
   accountant: ["payments:view", "invoices:view", "reports:view"],
   contributor: ["payments:create", "payments:view_own"],
   viewer: ["payments:view", "invoices:view", "reports:view"],
-};
+} satisfies Record<string, Permission[]>;
+
 const roleSchema = new mongoose.Schema(
   {
     businessId: {

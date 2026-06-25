@@ -17,6 +17,11 @@ const businessSchema = new mongoose.Schema(
       index: true,
     },
 
+    profile_img: {
+      type: String,
+      required: false,
+    },
+
     industry: {
       type: String,
       required: true,
@@ -46,6 +51,21 @@ const businessSchema = new mongoose.Schema(
   {
     timestamps: true,
     versionKey: false,
+    toJSON: {
+      transform: (_doc, ret) => {
+        const business = ret as {
+          _id?: { toString: () => string };
+          id?: string;
+        };
+
+        if (business._id) {
+          business.id = business._id.toString();
+        }
+
+        delete business._id;
+        return ret;
+      },
+    },
   },
 );
 

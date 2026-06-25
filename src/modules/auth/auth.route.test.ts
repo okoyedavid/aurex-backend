@@ -1,22 +1,21 @@
-import mongoose from "mongoose";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../../app.js";
-import { env } from "../../config/env.js";
 import { User } from "../users/user.models.js";
 
-beforeAll(async () => {
-  await mongoose.connect(env.MONGO_URI);
-});
+const createdEmails = new Set<string>();
 
-afterAll(async () => {
-  await User.deleteMany({ email: /@test\.local$/ });
-  await mongoose.disconnect();
+afterEach(async () => {
+  await Promise.all(
+    [...createdEmails].map((email) => User.deleteOne({ email })),
+  );
+  createdEmails.clear();
 });
 
 describe("POST /api/auth/register", () => {
   it("registers a user then logs in", async () => {
     const email = `test-${Date.now()}@test.local`;
+    const newEmail = `new-${Date.now()}@test.local`;
     const password = "Password123!";
     const agent = request.agent(app);
     const res = await agent.post("/api/auth/register").send({
@@ -24,6 +23,8 @@ describe("POST /api/auth/register", () => {
       email,
       password,
     });
+    createdEmails.add(email);
+    createdEmails.add(newEmail);
 
     expect(res.status).toBe(201);
     expect(res.body.message).toContain("User registered");
@@ -43,7 +44,7 @@ describe("POST /api/auth/register", () => {
     );
 
     const changeEmailRes = await agent.post("/api/me/email/change").send({
-      newEmail: `new-${Date.now()}@test.local`,
+      newEmail,
     });
 
     expect(changeEmailRes.status).toBe(201);

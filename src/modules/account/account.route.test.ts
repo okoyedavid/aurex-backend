@@ -1,17 +1,15 @@
-import mongoose from "mongoose";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { app } from "../../app.js";
-import { env } from "../../config/env.js";
 import { User } from "../users/user.models.js";
 
-beforeAll(async () => {
-  await mongoose.connect(env.MONGO_URI);
-});
+const createdEmails = new Set<string>();
 
-afterAll(async () => {
-  await User.deleteMany({ email: /@test\.local$/ });
-  await mongoose.disconnect();
+afterEach(async () => {
+  await Promise.all(
+    [...createdEmails].map((email) => User.deleteOne({ email })),
+  );
+  createdEmails.clear();
 });
 
 const registerAndLogin = async () => {
@@ -24,6 +22,7 @@ const registerAndLogin = async () => {
     email,
     password,
   });
+  createdEmails.add(email);
 
   const loginRes = await agent.post("/api/auth/login").send({
     email,

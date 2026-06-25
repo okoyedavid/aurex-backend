@@ -40,6 +40,10 @@ const createCloudinaryService = ({
       return { deleted: false, reason: "missing_url" as const };
     }
 
+    if (process.env.NODE_ENV === "test") {
+      return { deleted: false, reason: "test_environment" as const };
+    }
+
     if (!apiKey || !apiSecret || !cloudName) {
       return { deleted: false, reason: "not_configured" as const };
     }

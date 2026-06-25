@@ -14,6 +14,7 @@ import { statusRouter } from "./modules/health/status.route.js";
 import { authRouter } from "./modules/auth/auth.route.js";
 import { sessionRouter } from "./modules/session/session.route.js";
 import { accountRouter } from "./modules/account/account.route.js";
+import { businessRouter } from "./modules/business/business.route.js";
 
 const app = express();
 
@@ -49,6 +50,7 @@ app.use("/status", statusRouter);
 app.use("/api/auth", authRouter);
 app.use("/api", sessionRouter);
 app.use("/api", accountRouter);
+app.use("/api/businesses", businessRouter);
 
 app.use(notFound);
 app.use(errorHandler);
