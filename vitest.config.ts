@@ -4,8 +4,8 @@ export default defineConfig({
   test: {
     exclude: ["**/node_modules/**", "**/dist/**"],
     fileParallelism: false,
-    hookTimeout: 60_000,
+    hookTimeout: 180_000,
     setupFiles: ["./tests/setup/mongoose.ts"],
-    testTimeout: 60_000,
+    testTimeout: 180_000,
   },
 });

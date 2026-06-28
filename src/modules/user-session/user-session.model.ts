@@ -1,6 +1,6 @@
 import mongoose, { InferSchemaType, Types } from "mongoose";
 
-type SessionJsonTransform = {
+export type SessionJsonTransform = {
   _id?: Types.ObjectId;
   id?: string;
   __v?: number;

@@ -3,9 +3,13 @@ import { BusinessMemberRepository } from "../business-member/business-member.rep
 import { RoleRepository } from "../role/role.repository.js";
 import { systemRolePermissions } from "../role/role.model.js";
 import { BusinessRepository } from "./business.repository.js";
-import { CreateBusinessPayload } from "./business.types.js";
+import {
+  CreateBusinessInput,
+  CreateBusinessPayload,
+} from "./business.types.js";
 import { CloudinaryService } from "../../services/cloudinary.service.js";
 import { HttpError } from "../../utils/api-error.js";
+import type { EmployeeListService } from "../employee-list/employee-list.service.js";
 
 const serializeMembershipBusiness = (membership: {
   id: string;
@@ -49,6 +53,7 @@ export type CreateBusinessDependencies = {
   withTransaction: WithTransaction;
   cloudinaryService: CloudinaryService;
   createHttpError: (message: string, statusCode: number) => HttpError;
+  employeeListService: EmployeeListService;
 };
 
 const createBusinessService = ({
@@ -58,6 +63,7 @@ const createBusinessService = ({
   createHttpError,
   withTransaction,
   cloudinaryService,
+  employeeListService,
 }: CreateBusinessDependencies) => {
   const deleteCloudinaryImageSafely = async (
     imageUrl: string | null | undefined,
@@ -73,7 +79,8 @@ const createBusinessService = ({
     profile_img,
     ownerUserId,
     industry,
-  }: CreateBusinessPayload) => {
+    employeeLists = [],
+  }: CreateBusinessInput) => {
     const createData: CreateBusinessPayload = { name, ownerUserId, industry };
 
     if (profile_img !== undefined) {
@@ -88,6 +95,7 @@ const createBusinessService = ({
         {
           businessId: business.id,
           name: "Owner",
+
           type: "system",
           key: "owner",
           permissions: systemRolePermissions.owner,
@@ -104,6 +112,17 @@ const createBusinessService = ({
         },
         { session: mongoSession },
       );
+
+      for (const employeeListInput of employeeLists) {
+        await employeeListService.createEmployeeList(
+          {
+            ...employeeListInput,
+            businessId: business.id,
+            createdByUserId: ownerUserId,
+          },
+          { session: mongoSession },
+        );
+      }
 
       return { business };
     });
@@ -196,10 +215,7 @@ const createBusinessService = ({
       throw createHttpError("business not found", 404);
     }
 
-    if (
-      previousProfileImage &&
-      previousProfileImage !== profile_img
-    ) {
+    if (previousProfileImage && previousProfileImage !== profile_img) {
       await deleteCloudinaryImageSafely(previousProfileImage);
     }
 

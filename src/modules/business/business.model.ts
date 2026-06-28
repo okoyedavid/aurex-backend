@@ -10,6 +10,13 @@ const businessSchema = new mongoose.Schema(
       maxlength: 50,
     },
 
+    country: {
+      type: String,
+      trim: true,
+    },
+
+    email: { type: String, trim: true },
+    address: { type: String, trim: true },
     ownerUserId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

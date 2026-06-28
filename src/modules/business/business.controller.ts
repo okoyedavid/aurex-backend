@@ -25,7 +25,7 @@ export const createBusinessController = ({
   const createBusiness = asyncHandler(async (req, res) => {
     const userContext = requireUser(req);
 
-    const { name, industry, profile_img } =
+    const { name, industry, profile_img, employeeLists } =
       createBusinessSchema.shape.body.parse(req.validatedBody);
 
     const { business } = await businessService.createNewBusiness({
@@ -33,6 +33,13 @@ export const createBusinessController = ({
       ownerUserId: userContext.id,
       industry,
       profile_img,
+      employeeLists: employeeLists?.map((employeeList) => ({
+        name: employeeList.name,
+        description: employeeList.description,
+        currency: employeeList.currency,
+        defaultPayFrequency: employeeList.payFrequency,
+        employees: employeeList.employees,
+      })),
     });
 
     return res.status(201).json({

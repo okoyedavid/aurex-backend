@@ -1,4 +1,4 @@
-import { QueryFilter, QueryOptions } from "mongoose";
+import { QueryFilter, QueryOptions, UpdateQuery } from "mongoose";
 import { RepositoryOptions } from "../../repositories/repository-types.js";
 import { Employee, EmployeeDocument } from "./employee.model.js";
 import {
@@ -65,15 +65,93 @@ const findEmployeesByEmployeeListId = (
     createdAt: -1,
   });
 
+const paginateEmployeesByList = async ({
+  businessId,
+  employeeListId,
+  page,
+  limit,
+}: {
+  businessId: string;
+  employeeListId: string;
+  page: number;
+  limit: number;
+}) => {
+  const query = {
+    businessId,
+    employeeListId,
+    status: { $ne: "archived" as const },
+  };
+  const [items, total] = await Promise.all([
+    Employee.find(query)
+      .sort({ fullName: 1, createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Employee.countDocuments(query),
+  ]);
+
+  return { items, total };
+};
+
+const findEmployeeByBusinessListAndId = (
+  businessId: string,
+  employeeListId: string,
+  employeeId: string,
+) => Employee.findOne({ _id: employeeId, businessId, employeeListId });
+
 const updateEmployeeById = (
   employeeId: string,
   payload: UpdateEmployeePayload,
   options: QueryOptions = {},
 ) =>
   Employee.findByIdAndUpdate(employeeId, payload, {
-    new: true,
+    returnDocument: "after",
     ...options,
   });
+
+const claimNextVerification = () => {
+  const now = new Date();
+
+  return Employee.findOneAndUpdate(
+    {
+      verificationJobStatus: { $in: ["pending", "retrying"] },
+      $or: [
+        { nextVerificationAttemptAt: null },
+        { nextVerificationAttemptAt: { $exists: false } },
+        { nextVerificationAttemptAt: { $lte: now } },
+      ],
+    },
+    {
+      $set: { verificationJobStatus: "processing" },
+      $inc: { verificationAttemptCount: 1 },
+    },
+    { returnDocument: "after", sort: { createdAt: 1 } },
+  );
+};
+
+const updateVerificationResult = (
+  employeeId: string,
+  payload: UpdateQuery<EmployeeDocument>,
+) =>
+  Employee.findByIdAndUpdate(employeeId, payload, {
+    returnDocument: "after",
+  });
+
+const countVerificationStatesByEmployeeListId = async (
+  employeeListId: string,
+) => {
+  const [total, pending, processing, retrying, verified, invalid, exhausted] =
+    await Promise.all([
+      Employee.countDocuments({ employeeListId }),
+      Employee.countDocuments({ employeeListId, verificationJobStatus: "pending" }),
+      Employee.countDocuments({ employeeListId, verificationJobStatus: "processing" }),
+      Employee.countDocuments({ employeeListId, verificationJobStatus: "retrying" }),
+      Employee.countDocuments({ employeeListId, accountVerificationStatus: "verified" }),
+      Employee.countDocuments({ employeeListId, accountVerificationStatus: "failed" }),
+      Employee.countDocuments({ employeeListId, verificationJobStatus: "exhausted" }),
+    ]);
+
+  return { total, pending, processing, retrying, verified, invalid, exhausted };
+};
 
 const archiveEmployeeById = (
   employeeId: string,
@@ -94,13 +172,18 @@ const deleteEmployeeById = (
 
 export const employeeRepository = {
   archiveEmployeeById,
+  claimNextVerification,
+  countVerificationStatesByEmployeeListId,
   createEmployee,
   createEmployees,
   deleteEmployeeById,
   findEmployeeById,
+  findEmployeeByBusinessListAndId,
   findEmployeesByBusinessId,
   findEmployeesByEmployeeListId,
+  paginateEmployeesByList,
   updateEmployeeById,
+  updateVerificationResult,
 };
 
 export type EmployeeRepository = typeof employeeRepository;

@@ -43,6 +43,22 @@ const businessMemberSchema = new mongoose.Schema(
   },
 );
 
+businessMemberSchema.set("toJSON", {
+  transform: (_doc, ret) => {
+    const member = ret as {
+      _id?: { toString: () => string };
+      id?: string;
+    };
+
+    if (member._id) {
+      member.id = member._id.toString();
+    }
+
+    delete member._id;
+    return ret;
+  },
+});
+
 businessMemberSchema.index({ businessId: 1, userId: 1 }, { unique: true });
 businessMemberSchema.index({ userId: 1, status: 1 });
 businessMemberSchema.index({ businessId: 1, status: 1 });

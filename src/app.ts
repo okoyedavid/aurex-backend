@@ -15,6 +15,9 @@ import { authRouter } from "./modules/auth/auth.route.js";
 import { sessionRouter } from "./modules/session/session.route.js";
 import { accountRouter } from "./modules/account/account.route.js";
 import { businessRouter } from "./modules/business/business.route.js";
+import { businessMemberRouter } from "./modules/business-member/business-member.route.js";
+import { paystackRouter } from "./modules/paystack/paystack.route.js";
+import { employeeListRouter } from "./modules/employee-list/employee-list.route.js";
 
 const app = express();
 
@@ -51,6 +54,9 @@ app.use("/api/auth", authRouter);
 app.use("/api", sessionRouter);
 app.use("/api", accountRouter);
 app.use("/api/businesses", businessRouter);
+app.use("/api/businesses/:businessId/members", businessMemberRouter);
+app.use("/api/businesses/:businessId/employee-lists", employeeListRouter);
+app.use("/api/paystack", paystackRouter);
 
 app.use(notFound);
 app.use(errorHandler);

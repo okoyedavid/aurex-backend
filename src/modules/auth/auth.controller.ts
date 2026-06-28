@@ -214,7 +214,9 @@ const createAuthController = ({
     const { user } = await authService.getCurrentUser(req.user.id);
 
     return res.status(200).json({
-      user,
+      data: user,
+      message: "user successfully retrieved",
+      success: true,
     });
   });
 

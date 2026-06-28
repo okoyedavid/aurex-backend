@@ -34,9 +34,59 @@ const findActiveMembershipByBusinessAndUser = (
     .populate("businessId")
     .populate("roleId");
 
+const memberPopulations = [
+  {
+    path: "businessId",
+    select: "name industry profile_img",
+  },
+  {
+    path: "roleId",
+    select: "name key type permissions deniedPermissions",
+  },
+  {
+    path: "userId",
+    select: "name email avatar",
+  },
+  {
+    path: "invitedByUserId",
+    select: "name email avatar",
+  },
+];
+
+const paginateBusinessMembersByBusinessId = async ({
+  businessId,
+  page,
+  limit,
+}: {
+  businessId: string;
+  page: number;
+  limit: number;
+}) => {
+  const [items, total] = await Promise.all([
+    BusinessMember.find({ businessId })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .populate(memberPopulations)
+      .limit(limit),
+    BusinessMember.countDocuments({ businessId }),
+  ]);
+
+  return { items, total };
+};
+
+const findBusinessMemberByBusinessAndId = (
+  businessId: string,
+  memberId: string,
+) =>
+  BusinessMember.findOne({ businessId, _id: memberId }).populate(
+    memberPopulations,
+  );
+
 export const businessMemberRepository = {
   createBusinessMember,
+  findBusinessMemberByBusinessAndId,
   findActiveMembershipByBusinessAndUser,
+  paginateBusinessMembersByBusinessId,
   findActiveMembershipsByUserId,
 };
 

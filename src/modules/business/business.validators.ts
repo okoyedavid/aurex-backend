@@ -1,15 +1,19 @@
 import z from "zod";
+import { employeeListInputSchema } from "../employee-list/employee-list.validators.js";
 
 export const objectIdSchema = z.string().trim().regex(/^[a-f\d]{24}$/i, {
   message: "Invalid business id",
 });
 
 const createBusinessSchema = z.object({
-  body: z.object({
-    name: z.string().trim().min(2).max(50),
-    profile_img: z.string().trim().min(8).max(250).optional(),
-    industry: z.string().trim().min(2).max(80),
-  }),
+  body: z
+    .object({
+      name: z.string().trim().min(2).max(50),
+      profile_img: z.string().trim().min(8).max(250).optional(),
+      industry: z.string().trim().min(2).max(80),
+      employeeLists: z.array(employeeListInputSchema).max(10).optional(),
+    })
+    .strict(),
 
   params: z.object({}),
   query: z.object({}),

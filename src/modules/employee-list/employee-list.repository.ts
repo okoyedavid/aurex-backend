@@ -28,6 +28,32 @@ const findEmployeeListsByBusinessId = (
   options: QueryOptions = {},
 ) => EmployeeList.find({ businessId }, null, options).sort({ createdAt: -1 });
 
+const paginateEmployeeListsByBusinessId = async ({
+  businessId,
+  page,
+  limit,
+}: {
+  businessId: string;
+  page: number;
+  limit: number;
+}) => {
+  const query = { businessId, status: "active" as const };
+  const [items, total] = await Promise.all([
+    EmployeeList.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    EmployeeList.countDocuments(query),
+  ]);
+
+  return { items, total };
+};
+
+const findEmployeeListByBusinessAndId = (
+  businessId: string,
+  employeeListId: string,
+) => EmployeeList.findOne({ _id: employeeListId, businessId });
+
 const findActiveEmployeeListsByBusinessId = (
   businessId: string,
   options: QueryOptions = {},
@@ -42,7 +68,7 @@ const updateEmployeeListById = (
   options: QueryOptions = {},
 ) =>
   EmployeeList.findByIdAndUpdate(employeeListId, payload, {
-    new: true,
+    returnDocument: "after",
     ...options,
   });
 
@@ -69,7 +95,9 @@ export const employeeListRepository = {
   deleteEmployeeListById,
   findActiveEmployeeListsByBusinessId,
   findEmployeeListById,
+  findEmployeeListByBusinessAndId,
   findEmployeeListsByBusinessId,
+  paginateEmployeeListsByBusinessId,
   updateEmployeeListById,
 };
 

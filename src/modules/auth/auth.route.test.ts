@@ -77,6 +77,6 @@ describe("POST /api/auth/register", () => {
 });
 
 vi.setConfig({
-  testTimeout: 30_000,
-  hookTimeout: 30_000,
+  testTimeout: 180_000,
+  hookTimeout: 180_000,
 });

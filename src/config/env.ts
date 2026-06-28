@@ -41,6 +41,13 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().min(1).optional(),
   CLOUDINARY_API_KEY: z.string().min(1).optional(),
   CLOUDINARY_CLOUD_NAME: z.string().min(1).optional(),
+  PAYSTACK_SECRET_KEY: z.string().min(1).optional(),
+  PAYSTACK_PUBLIC_KEY: z.string().min(1).optional(),
+  PAYSTACK_BASE_URL: z.string().url().default("https://api.paystack.co"),
+  PAYSTACK_VERIFICATION_MODE: z.enum(["demo", "live"]).default("demo"),
+  PAYSTACK_TEST_BANK_CODE: z.string().regex(/^\d{3,6}$/).default("001"),
+  VERIFICATION_WORKER_INTERVAL_MS: z.coerce.number().int().min(500).default(1000),
+  VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(5),
 });
 
 export const env = envSchema.parse(process.env);
