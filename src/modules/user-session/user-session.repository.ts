@@ -1,6 +1,6 @@
 import { QueryFilter, QueryOptions } from "mongoose";
 import { UserSession, UserSessionDocument } from "./user-session.model.js";
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 
 type CreateUserSession = {
   userId: string;

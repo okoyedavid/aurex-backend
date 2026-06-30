@@ -1,5 +1,5 @@
 import { QueryOptions } from "mongoose";
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 import { EmployeeList } from "./employee-list.model.js";
 import {
   CreateEmployeeList,

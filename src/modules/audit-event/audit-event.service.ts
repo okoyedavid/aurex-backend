@@ -3,7 +3,7 @@ import {
   LocationMetadata,
   RepositoryOptions,
   RequestMetadata,
-} from "../../repositories/repository-types.js";
+} from "../../types/repository-types.js";
 import { HashService } from "../../utils/hash.js";
 import { NotificationService } from "../notification/notification.service.js";
 import { AuditEventRepository } from "./audit-event.repository.js";
@@ -104,7 +104,7 @@ const createAuditEventService = ({
     try {
       await recordSecurityEvent(payload);
     } catch (error) {
-      console.error("Failed to write security audit event", error);
+      console.error("Failed to record audit event or notification", error);
     }
   };
 

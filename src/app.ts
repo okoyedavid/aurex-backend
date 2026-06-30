@@ -18,6 +18,12 @@ import { businessRouter } from "./modules/business/business.route.js";
 import { businessMemberRouter } from "./modules/business-member/business-member.route.js";
 import { paystackRouter } from "./modules/paystack/paystack.route.js";
 import { employeeListRouter } from "./modules/employee-list/employee-list.route.js";
+import {
+  businessInviteRouter,
+  userBusinessInviteRouter,
+} from "./modules/business-invite/business-invite.route.js";
+import { notificationRouter } from "./modules/notification/notification.route.js";
+import { roleRouter } from "./modules/role/role.route.js";
 
 const app = express();
 
@@ -55,7 +61,11 @@ app.use("/api", sessionRouter);
 app.use("/api", accountRouter);
 app.use("/api/businesses", businessRouter);
 app.use("/api/businesses/:businessId/members", businessMemberRouter);
+app.use("/api/businesses/:businessId/invites", businessInviteRouter);
+app.use("/api/businesses/:businessId/roles", roleRouter);
 app.use("/api/businesses/:businessId/employee-lists", employeeListRouter);
+app.use("/api/me/business-invites", userBusinessInviteRouter);
+app.use("/api/me/notifications", notificationRouter);
 app.use("/api/paystack", paystackRouter);
 
 app.use(notFound);

@@ -1,7 +1,7 @@
 import { QueryOptions } from "mongoose";
 import { Business, type BusinessDocument } from "./business.model.js";
 import { CreateBusinessPayload } from "./business.types.js";
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 
 const findBusinessById = (id: string) => Business.findById(id);
 

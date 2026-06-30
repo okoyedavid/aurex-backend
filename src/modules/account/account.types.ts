@@ -1,4 +1,4 @@
-import type { RequestMetadata } from "../../repositories/repository-types.js";
+import type { RequestMetadata } from "../../types/repository-types.js";
 import { HttpError } from "../../utils/api-error.js";
 import { HashService } from "../../utils/hash.js";
 import { WithTransaction } from "../../utils/mongooose-transactions.js";

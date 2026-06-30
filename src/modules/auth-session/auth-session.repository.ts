@@ -1,6 +1,6 @@
 import { QueryOptions } from "mongoose";
 import { AuthSession, AuthSessionDocument } from "./auth-session.model.js";
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 
 type CreateAuthSession = {
   userId: string;

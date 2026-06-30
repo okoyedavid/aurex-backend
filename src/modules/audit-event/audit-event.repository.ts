@@ -4,7 +4,7 @@ import {
   AuditEventDocument,
   CreateAuditEventPayload,
 } from "./audit-event.model.js";
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 
 type FindAuditEventsOptions = RepositoryOptions & {
   limit?: number;

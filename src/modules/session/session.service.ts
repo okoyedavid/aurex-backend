@@ -2,7 +2,7 @@ import { ClientSession } from "mongoose";
 import {
   LocationMetadata,
   RequestMetadata,
-} from "../../repositories/repository-types.js";
+} from "../../types/repository-types.js";
 import { jsonWebService } from "../../utils/jwt.js";
 import { UserDocument } from "../users/user.models.js";
 import {

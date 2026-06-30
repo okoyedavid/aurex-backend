@@ -7,7 +7,7 @@ const auditEventSchema = new mongoose.Schema(
     category: {
       type: String,
       required: true,
-      enum: ["authentication", "account", "session", "security"],
+      enum: ["authentication", "account", "session", "security", "business"],
       index: true,
     },
     outcome: {
@@ -61,7 +61,12 @@ export type AuditEventDocument = InferSchemaType<typeof auditEventSchema>;
 export type CreateAuditEventPayload = {
   eventId: string;
   eventType: string;
-  category: "authentication" | "account" | "session" | "security";
+  category:
+    | "authentication"
+    | "account"
+    | "session"
+    | "security"
+    | "business";
   outcome: "success" | "failure" | "blocked";
   severity?: "info" | "warning" | "error" | "critical";
 

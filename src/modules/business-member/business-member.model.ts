@@ -36,6 +36,39 @@ const businessMemberSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+
+    roleUpdatedByUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    roleUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+
+    statusUpdatedByUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    statusUpdatedAt: {
+      type: Date,
+      default: null,
+    },
+
+    removedByUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+
+    removedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

@@ -1,5 +1,5 @@
 import { EmployeeRepository } from "./employee.repository.js";
-import type { RepositoryOptions } from "../../repositories/repository-types.js";
+import type { RepositoryOptions } from "../../types/repository-types.js";
 import type { EmployeeListRepository } from "../employee-list/employee-list.repository.js";
 import type { WithTransaction } from "../../utils/mongooose-transactions.js";
 import type { HttpError } from "../../utils/api-error.js";
@@ -43,7 +43,10 @@ const createEmployeeService = ({
       payload.employeeListId,
     );
 
-    if (!employeeList || String(employeeList.businessId) !== payload.businessId) {
+    if (
+      !employeeList ||
+      String(employeeList.businessId) !== payload.businessId
+    ) {
       throw createHttpError("Employee list not found in this business", 404);
     }
 
@@ -154,7 +157,8 @@ const createEmployeeService = ({
     }
 
     const bankDetailsChanged =
-      (updates.bankCode !== undefined && updates.bankCode !== existing.bankCode) ||
+      (updates.bankCode !== undefined &&
+        updates.bankCode !== existing.bankCode) ||
       (updates.accountNumber !== undefined &&
         updates.accountNumber !== existing.accountNumber);
 

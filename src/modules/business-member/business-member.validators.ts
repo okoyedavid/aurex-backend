@@ -29,4 +29,35 @@ const getBusinessMemberSchema = z.object({
   query: z.object({}).strict().optional(),
 });
 
-export { listBusinessMemberSchema, getBusinessMemberSchema };
+const businessMemberParamsSchema = z
+  .object({
+    businessId: objectIdSchema,
+    memberId: objectIdSchema,
+  })
+  .strict();
+
+const updateBusinessMemberRoleSchema = z.object({
+  body: z.object({ roleId: objectIdSchema }).strict(),
+  params: businessMemberParamsSchema,
+  query: z.object({}).strict(),
+});
+
+const updateBusinessMemberStatusSchema = z.object({
+  body: z.object({ status: z.enum(["active", "suspended"]) }).strict(),
+  params: businessMemberParamsSchema,
+  query: z.object({}).strict(),
+});
+
+const removeBusinessMemberSchema = z.object({
+  body: z.object({}).strict().optional(),
+  params: businessMemberParamsSchema,
+  query: z.object({}).strict(),
+});
+
+export {
+  getBusinessMemberSchema,
+  listBusinessMemberSchema,
+  removeBusinessMemberSchema,
+  updateBusinessMemberRoleSchema,
+  updateBusinessMemberStatusSchema,
+};

@@ -1,5 +1,5 @@
 import { QueryFilter, QueryOptions, UpdateQuery } from "mongoose";
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 import { Employee, EmployeeDocument } from "./employee.model.js";
 import {
   CreateEmployeePayload,
@@ -142,21 +142,36 @@ const countVerificationStatesByEmployeeListId = async (
   const [total, pending, processing, retrying, verified, invalid, exhausted] =
     await Promise.all([
       Employee.countDocuments({ employeeListId }),
-      Employee.countDocuments({ employeeListId, verificationJobStatus: "pending" }),
-      Employee.countDocuments({ employeeListId, verificationJobStatus: "processing" }),
-      Employee.countDocuments({ employeeListId, verificationJobStatus: "retrying" }),
-      Employee.countDocuments({ employeeListId, accountVerificationStatus: "verified" }),
-      Employee.countDocuments({ employeeListId, accountVerificationStatus: "failed" }),
-      Employee.countDocuments({ employeeListId, verificationJobStatus: "exhausted" }),
+      Employee.countDocuments({
+        employeeListId,
+        verificationJobStatus: "pending",
+      }),
+      Employee.countDocuments({
+        employeeListId,
+        verificationJobStatus: "processing",
+      }),
+      Employee.countDocuments({
+        employeeListId,
+        verificationJobStatus: "retrying",
+      }),
+      Employee.countDocuments({
+        employeeListId,
+        accountVerificationStatus: "verified",
+      }),
+      Employee.countDocuments({
+        employeeListId,
+        accountVerificationStatus: "failed",
+      }),
+      Employee.countDocuments({
+        employeeListId,
+        verificationJobStatus: "exhausted",
+      }),
     ]);
 
   return { total, pending, processing, retrying, verified, invalid, exhausted };
 };
 
-const archiveEmployeeById = (
-  employeeId: string,
-  options: QueryOptions = {},
-) =>
+const archiveEmployeeById = (employeeId: string, options: QueryOptions = {}) =>
   updateEmployeeById(
     employeeId,
     {
@@ -165,10 +180,8 @@ const archiveEmployeeById = (
     options,
   );
 
-const deleteEmployeeById = (
-  employeeId: string,
-  options: QueryOptions = {},
-) => Employee.findByIdAndDelete(employeeId, options);
+const deleteEmployeeById = (employeeId: string, options: QueryOptions = {}) =>
+  Employee.findByIdAndDelete(employeeId, options);
 
 export const employeeRepository = {
   archiveEmployeeById,

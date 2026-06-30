@@ -1,37 +1,73 @@
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
+import type { HttpError } from "../../utils/api-error.js";
 import { NotificationRepository } from "./notification.repository.js";
-import { CreateNotificationPayload } from "./notification.types.js";
+import {
+  CreateNotificationPayload,
+  FindNotificationsOptions,
+} from "./notification.types.js";
 
 type CreateNotificationServiceDependencies = {
   notificationRepository: NotificationRepository;
+  createHttpError: (message: string, statusCode: number) => HttpError;
 };
 
 const createNotificationService = ({
   notificationRepository,
+  createHttpError,
 }: CreateNotificationServiceDependencies) => {
-  const getUserNotifications = (
+  const getUserNotifications = async (
     userId: string,
-    options: RepositoryOptions = {},
-  ) => notificationRepository.findNotificationsByUserId(userId, options);
-
-  const markNotificationRead = (notificationId: string, userId: string) =>
-    notificationRepository.markNotificationRead(notificationId, userId);
-
-  const markAllNotificationsRead = (userId: string) =>
-    notificationRepository.markAllNotificationsRead(userId);
-
-  const createNotification = async (
-    payload: CreateNotificationPayload,
-    options: RepositoryOptions,
+    options: FindNotificationsOptions,
   ) => {
-    return notificationRepository.createNotification(payload, options);
+    const { items, total, unreadCount } =
+      await notificationRepository.paginateNotificationsByUserId(
+        userId,
+        options,
+      );
+
+    return {
+      items,
+      unreadCount,
+      pagination: {
+        page: options.page,
+        limit: options.limit,
+        total,
+        totalPages: Math.ceil(total / options.limit),
+      },
+    };
   };
 
+  const markNotificationRead = async (
+    notificationId: string,
+    userId: string,
+  ) => {
+    const notification = await notificationRepository.markNotificationRead(
+      notificationId,
+      userId,
+    );
+
+    if (!notification) {
+      throw createHttpError("Notification not found", 404);
+    }
+
+    return { notification };
+  };
+
+  const markAllNotificationsRead = async (userId: string) => {
+    const result = await notificationRepository.markAllNotificationsRead(userId);
+    return { updatedCount: result.modifiedCount };
+  };
+
+  const createNotification = (
+    payload: CreateNotificationPayload,
+    options: RepositoryOptions = {},
+  ) => notificationRepository.createNotification(payload, options);
+
   return {
-    getUserNotifications,
-    markNotificationRead,
-    markAllNotificationsRead,
     createNotification,
+    getUserNotifications,
+    markAllNotificationsRead,
+    markNotificationRead,
   };
 };
 

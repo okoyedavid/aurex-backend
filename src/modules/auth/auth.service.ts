@@ -1,4 +1,4 @@
-import { RequestMetadata } from "../../repositories/repository-types.js";
+import { RequestMetadata } from "../../types/repository-types.js";
 import { jsonWebService } from "../../utils/jwt.js";
 import {
   LoginInput,

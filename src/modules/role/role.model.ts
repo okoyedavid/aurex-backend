@@ -7,6 +7,11 @@ export const allowedPermissions = [
   "members:update_role",
   "members:update_status",
   "members:view",
+  "roles:view",
+  "roles:create",
+  "roles:update",
+  "roles:delete",
+  "roles:assign",
   "payments:create",
   "payments:view",
   "payments:view_own",
@@ -125,6 +130,14 @@ const roleSchema = new mongoose.Schema(
       enum: allowedPermissions,
       default: [],
     },
+
+    status: {
+      type: String,
+      enum: ["active", "archived"],
+      default: "active",
+      required: true,
+      index: true,
+    },
   },
   { timestamps: true, versionKey: false },
 );
@@ -145,6 +158,21 @@ roleSchema.set("toJSON", {
   },
 });
 
+roleSchema.index(
+  { key: 1, type: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { type: "system" },
+  },
+);
+
+roleSchema.index(
+  { businessId: 1, key: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { type: "custom" },
+  },
+);
 export type RoleDocument = InferSchemaType<typeof roleSchema>;
 
 export const Role = model<RoleDocument>("Role", roleSchema);

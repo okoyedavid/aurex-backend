@@ -1,4 +1,4 @@
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 import { BusinessMember } from "./business-member.model.js";
 
 type CreateBusinessMemberPayload = {
@@ -29,10 +29,52 @@ const findActiveMembershipsByUserId = (userId: string) =>
 const findActiveMembershipByBusinessAndUser = (
   businessId: string,
   userId: string,
+  options: RepositoryOptions = {},
 ) =>
   BusinessMember.findOne({ businessId, userId, status: "active" })
+    .session(options.session ?? null)
     .populate("businessId")
     .populate("roleId");
+
+const findMembershipByBusinessAndUser = (
+  businessId: string,
+  userId: string,
+  options: RepositoryOptions = {},
+) =>
+  BusinessMember.findOne({ businessId, userId }).session(
+    options.session ?? null,
+  );
+
+const reactivateBusinessMember = (
+  memberId: string,
+  payload: { roleId: string; invitedByUserId: string },
+  options: RepositoryOptions = {},
+) =>
+  BusinessMember.findByIdAndUpdate(
+    memberId,
+    {
+      $set: {
+        ...payload,
+        status: "active",
+        roleUpdatedByUserId: payload.invitedByUserId,
+        roleUpdatedAt: new Date(),
+        statusUpdatedByUserId: payload.invitedByUserId,
+        statusUpdatedAt: new Date(),
+      },
+      $unset: {
+        removedByUserId: 1,
+        removedAt: 1,
+      },
+    },
+    { returnDocument: "after", session: options.session },
+  );
+
+const countAssignedMembersByRole = (businessId: string, roleId: string) =>
+  BusinessMember.countDocuments({
+    businessId,
+    roleId,
+    status: { $in: ["active", "suspended"] },
+  });
 
 const memberPopulations = [
   {
@@ -49,6 +91,18 @@ const memberPopulations = [
   },
   {
     path: "invitedByUserId",
+    select: "name email avatar",
+  },
+  {
+    path: "roleUpdatedByUserId",
+    select: "name email avatar",
+  },
+  {
+    path: "statusUpdatedByUserId",
+    select: "name email avatar",
+  },
+  {
+    path: "removedByUserId",
     select: "name email avatar",
   },
 ];
@@ -82,12 +136,67 @@ const findBusinessMemberByBusinessAndId = (
     memberPopulations,
   );
 
+const updateBusinessMemberRole = (
+  businessId: string,
+  memberId: string,
+  roleId: string,
+  updatedByUserId: string,
+) =>
+  BusinessMember.findOneAndUpdate(
+    { _id: memberId, businessId, status: { $ne: "removed" } },
+    {
+      roleId,
+      roleUpdatedByUserId: updatedByUserId,
+      roleUpdatedAt: new Date(),
+    },
+    { returnDocument: "after", runValidators: true },
+  ).populate(memberPopulations);
+
+const updateBusinessMemberStatus = (
+  businessId: string,
+  memberId: string,
+  status: "active" | "suspended",
+  updatedByUserId: string,
+) =>
+  BusinessMember.findOneAndUpdate(
+    { _id: memberId, businessId, status: { $ne: "removed" } },
+    {
+      status,
+      statusUpdatedByUserId: updatedByUserId,
+      statusUpdatedAt: new Date(),
+    },
+    { returnDocument: "after", runValidators: true },
+  ).populate(memberPopulations);
+
+const removeBusinessMember = (
+  businessId: string,
+  memberId: string,
+  removedByUserId: string,
+) =>
+  BusinessMember.findOneAndUpdate(
+    { _id: memberId, businessId, status: { $ne: "removed" } },
+    {
+      status: "removed",
+      removedByUserId,
+      removedAt: new Date(),
+      statusUpdatedByUserId: removedByUserId,
+      statusUpdatedAt: new Date(),
+    },
+    { returnDocument: "after", runValidators: true },
+  ).populate(memberPopulations);
+
 export const businessMemberRepository = {
   createBusinessMember,
+  countAssignedMembersByRole,
   findBusinessMemberByBusinessAndId,
+  findMembershipByBusinessAndUser,
   findActiveMembershipByBusinessAndUser,
   paginateBusinessMembersByBusinessId,
   findActiveMembershipsByUserId,
+  reactivateBusinessMember,
+  removeBusinessMember,
+  updateBusinessMemberRole,
+  updateBusinessMemberStatus,
 };
 
 export type BusinessMemberRepository = typeof businessMemberRepository;

@@ -2,7 +2,7 @@ import { ClientSession } from "mongoose";
 import {
   LocationMetadata,
   RequestMetadata,
-} from "../../repositories/repository-types.js";
+} from "../../types/repository-types.js";
 import { TokenService } from "../token/token.service.js";
 import { AuthSessionRepository } from "../auth-session/auth-session.repository.js";
 import { UserSessionRepository } from "../user-session/user-session.repository.js";

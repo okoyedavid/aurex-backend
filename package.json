@@ -8,6 +8,7 @@
     "download:maxmind": "bash scripts/download-maxmind.sh",
     "render-build": "npm ci --include=dev && npm run download:maxmind && npm run build",
     "build": "tsc",
+    "seed:roles": "tsx scripts/seed-system-roles.ts",
     "start": "node dist/server.js",
     "test": "cross-env NODE_ENV=test vitest",
     "test:watch": "vitest --watch"

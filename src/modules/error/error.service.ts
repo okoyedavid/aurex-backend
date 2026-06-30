@@ -1,7 +1,7 @@
 import {
   LocationMetadata,
   RequestMetadata,
-} from "../../repositories/repository-types.js";
+} from "../../types/repository-types.js";
 import { ApiError } from "../../utils/api-error.js";
 import type { UserRepository } from "../users/user.repository.js";
 import { AuditEventService } from "../audit-event/audit-event.service.js";

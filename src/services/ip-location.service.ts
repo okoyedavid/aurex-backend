@@ -2,7 +2,7 @@ import maxmind, { type CityResponse, type Reader } from "maxmind";
 import net from "node:net";
 import path from "node:path";
 import { env } from "../config/env.js";
-import { LocationMetadata } from "../repositories/repository-types.js";
+import { LocationMetadata } from "../types/repository-types.js";
 import {
   getRequestMetadata,
   isPrivateIpAddress,

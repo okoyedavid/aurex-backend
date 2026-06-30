@@ -28,6 +28,22 @@ const notificationSchema = new mongoose.Schema(
   { versionKey: false },
 );
 
+notificationSchema.set("toJSON", {
+  transform: (_doc, ret) => {
+    const notification = ret as {
+      _id?: { toString: () => string };
+      id?: string;
+    };
+
+    if (notification._id) {
+      notification.id = notification._id.toString();
+    }
+
+    delete notification._id;
+    return ret;
+  },
+});
+
 notificationSchema.index({ userId: 1, createdAt: -1 });
 notificationSchema.index({ userId: 1, readAt: 1, createdAt: -1 });
 

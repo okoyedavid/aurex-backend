@@ -3,6 +3,9 @@ import { BusinessMemberService } from "./business-member.service.js";
 import {
   getBusinessMemberSchema,
   listBusinessMemberSchema,
+  removeBusinessMemberSchema,
+  updateBusinessMemberRoleSchema,
+  updateBusinessMemberStatusSchema,
 } from "./business-member.validators.js";
 
 export type CreateBusinessMemberControllerDependencies = {
@@ -51,5 +54,91 @@ export const createBusinessMemberController = ({
     });
   });
 
-  return { getBusinessMember, listBusinessMembers };
+  const updateBusinessMemberRole = asyncHandler(async (req, res) => {
+    if (!req.user?.id) {
+      return res.status(401).json({
+        message: "Authentication required",
+        success: false,
+      });
+    }
+
+    const params = updateBusinessMemberRoleSchema.shape.params.parse(
+      req.validatedParams,
+    );
+    const { roleId } = updateBusinessMemberRoleSchema.shape.body.parse(
+      req.validatedBody,
+    );
+    const { businessMember } =
+      await businessMemberService.updateBusinessMemberRole({
+        ...params,
+        roleId,
+        actorUserId: req.user.id,
+      });
+
+    return res.status(200).json({
+      data: businessMember,
+      message: "Business member role updated",
+      success: true,
+    });
+  });
+
+  const updateBusinessMemberStatus = asyncHandler(async (req, res) => {
+    if (!req.user?.id) {
+      return res.status(401).json({
+        message: "Authentication required",
+        success: false,
+      });
+    }
+
+    const params = updateBusinessMemberStatusSchema.shape.params.parse(
+      req.validatedParams,
+    );
+    const { status } = updateBusinessMemberStatusSchema.shape.body.parse(
+      req.validatedBody,
+    );
+    const { businessMember } =
+      await businessMemberService.updateBusinessMemberStatus({
+        ...params,
+        status,
+        actorUserId: req.user.id,
+      });
+
+    return res.status(200).json({
+      data: businessMember,
+      message: "Business member status updated",
+      success: true,
+    });
+  });
+
+  const removeBusinessMember = asyncHandler(async (req, res) => {
+    if (!req.user?.id) {
+      return res.status(401).json({
+        message: "Authentication required",
+        success: false,
+      });
+    }
+
+    const params = removeBusinessMemberSchema.shape.params.parse(
+      req.validatedParams,
+    );
+    const { businessMember } =
+      await businessMemberService.removeBusinessMember({
+        ...params,
+        actorUserId: req.user.id,
+      });
+
+    return res.status(200).json({
+      data: businessMember,
+      message: "Business member removed",
+      success: true,
+    });
+  });
+
+  return {
+    getBusinessMember,
+    listBusinessMembers,
+    removeBusinessMember,
+    updateBusinessMemberRole,
+    updateBusinessMemberStatus,
+  };
 };

@@ -1,31 +1,13 @@
 import { env } from "../../config/env.js";
 
 import { HttpError } from "../../utils/api-error.js";
+import type {
+  EmailProvider,
+  SendBusinessInviteEmailPayload,
+  SendVerificationOtpEmailPayload,
+} from "./email.types.js";
 
 type EmailHttpErrorFactory = (message: string, statusCode: number) => HttpError;
-
-type SendEmailPayload = {
-  from: string;
-  to: string;
-  subject: string;
-  text: string;
-  html: string;
-};
-
-type SendEmailResult = {
-  id: string | null;
-  provider: "console" | "resend";
-};
-
-type EmailProvider = {
-  sendEmail: (payload: SendEmailPayload) => Promise<SendEmailResult>;
-};
-
-type SendVerificationOtpEmailPayload = {
-  to: string;
-  name?: string | null;
-  otp: string;
-};
 
 type ResendErrorResponse = {
   message?: unknown;
@@ -79,7 +61,7 @@ const createResendEmailProvider = ({
         body: JSON.stringify(payload),
       });
     } catch (_error) {
-      throw createHttpError("Failed to send verification email", 502);
+      throw createHttpError("Failed to send email", 502);
     }
 
     const responseBody = (await response.json().catch(() => null)) as
@@ -96,8 +78,8 @@ const createResendEmailProvider = ({
 
       throw createHttpError(
         providerMessage
-          ? `Failed to send verification email: ${providerMessage}`
-          : "Failed to send verification email",
+          ? `Failed to send email: ${providerMessage}`
+          : "Failed to send email",
         502,
       );
     }
@@ -108,6 +90,36 @@ const createResendEmailProvider = ({
     };
   },
 });
+
+const escapeHtml = (value: string) =>
+  value.replace(/[&<>'"]/g, (character) => {
+    const entities: Record<string, string> = {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      "'": "&#39;",
+      '"': "&quot;",
+    };
+
+    return entities[character] ?? character;
+  });
+
+const requireHttpUrl = (value: string) => {
+  try {
+    const url = new URL(value);
+
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("Unsupported invite URL protocol");
+    }
+
+    return url.toString();
+  } catch (_error) {
+    throw new Error("A valid HTTP invitation URL is required");
+  }
+};
+
+const normalizeEmailHeader = (value: string) =>
+  value.replace(/[\r\n]+/g, " ").trim();
 
 const createEmailService = ({
   emailProvider,
@@ -125,6 +137,37 @@ const createEmailService = ({
         ? createResendEmailProvider({ apiKey: resendApiKey, createHttpError })
         : null;
 
+  const sendPreparedEmail = async ({
+    to,
+    subject,
+    text,
+    html,
+    developmentDescription,
+  }: {
+    to: string;
+    subject: string;
+    text: string;
+    html: string;
+    developmentDescription: string;
+  }) => {
+    if (!provider || !fromEmail) {
+      if (isProduction) {
+        throw createHttpError("Email service is not configured", 500);
+      }
+
+      console.info(`[email:dev] ${developmentDescription} for ${to}`);
+      return { id: null, provider: "console" as const };
+    }
+
+    return provider.sendEmail({
+      from: fromEmail,
+      to: deliveryOverrideTo ?? to,
+      subject,
+      text,
+      html,
+    });
+  };
+
   const sendVerificationOtpEmail = async ({
     to,
     name,
@@ -132,16 +175,6 @@ const createEmailService = ({
   }: SendVerificationOtpEmailPayload) => {
     if (!to || !otp) {
       throw createHttpError("Email recipient and OTP are required", 500);
-    }
-
-    if (!provider || !fromEmail) {
-      if (isProduction) {
-        throw createHttpError("Email service is not configured", 500);
-      }
-
-      console.info(`[email:dev] Verification OTP for ${to}: ${otp}`);
-
-      return { id: null, provider: "console" };
     }
 
     const subject = `Verify your email for ${appName}`;
@@ -155,26 +188,90 @@ const createEmailService = ({
     ].join("\n");
     const html = `
       <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
-        <p>Hi ${recipientName},</p>
+        <p>Hi ${escapeHtml(recipientName)},</p>
         <p>Your verification code is:</p>
         <p style="font-size: 28px; font-weight: 700; letter-spacing: 0.2em;">${otp}</p>
         <p>This code expires in 15 minutes.</p>
       </div>
     `;
 
-    return provider.sendEmail({
-      from: fromEmail,
-      to: deliveryOverrideTo ?? to,
+    return sendPreparedEmail({
+      to,
       subject,
       text,
       html,
+      developmentDescription: `Verification OTP generated: ${otp}`,
+    });
+  };
+
+  const sendBusinessInviteEmail = async ({
+    to,
+    recipientName,
+    inviterName,
+    businessName,
+    roleName,
+    inviteUrl,
+    expiresAt,
+  }: SendBusinessInviteEmailPayload) => {
+    if (!to || !inviterName || !businessName || !roleName || !inviteUrl) {
+      throw createHttpError("Business invitation email data is incomplete", 500);
+    }
+
+    if (!(expiresAt instanceof Date) || Number.isNaN(expiresAt.getTime())) {
+      throw createHttpError("A valid invitation expiry is required", 500);
+    }
+
+    let normalizedInviteUrl: string;
+
+    try {
+      normalizedInviteUrl = requireHttpUrl(inviteUrl);
+    } catch (_error) {
+      throw createHttpError("A valid HTTP invitation URL is required", 500);
+    }
+
+    const greetingName = recipientName?.trim() || "there";
+    const expiration = expiresAt.toUTCString();
+    const subject = normalizeEmailHeader(
+      `${inviterName} invited you to join ${businessName}`,
+    );
+    const text = [
+      `Hi ${greetingName},`,
+      "",
+      `${inviterName} invited you to join ${businessName} as ${roleName}.`,
+      "",
+      `Accept the invitation: ${normalizedInviteUrl}`,
+      "",
+      `This invitation expires on ${expiration}.`,
+      "If you were not expecting this invitation, you can ignore this email.",
+    ].join("\n");
+    const html = `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6; color: #111827;">
+        <p>Hi ${escapeHtml(greetingName)},</p>
+        <p><strong>${escapeHtml(inviterName)}</strong> invited you to join <strong>${escapeHtml(businessName)}</strong> as <strong>${escapeHtml(roleName)}</strong>.</p>
+        <p>
+          <a href="${escapeHtml(normalizedInviteUrl)}" style="display: inline-block; padding: 10px 16px; background: #111827; color: #ffffff; text-decoration: none; border-radius: 4px;">
+            Accept invitation
+          </a>
+        </p>
+        <p>This invitation expires on ${escapeHtml(expiration)}.</p>
+        <p>If you were not expecting this invitation, you can ignore this email.</p>
+      </div>
+    `;
+
+    return sendPreparedEmail({
+      to,
+      subject,
+      text,
+      html,
+      developmentDescription: "Business invitation email prepared",
     });
   };
 
   return {
+    sendBusinessInviteEmail,
     sendVerificationOtpEmail,
   };
 };
 
-export { createEmailService };
+export { createEmailService, createResendEmailProvider };
 export type EmailService = ReturnType<typeof createEmailService>;

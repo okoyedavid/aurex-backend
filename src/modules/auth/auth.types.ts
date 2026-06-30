@@ -2,7 +2,7 @@ import z from "zod";
 import {
   LocationMetadata,
   RequestMetadata,
-} from "../../repositories/repository-types.js";
+} from "../../types/repository-types.js";
 import { loginSchema } from "./auth.validators.js";
 import { UserRepository } from "../users/user.repository.js";
 import { SessionService } from "../session/session.service.js";

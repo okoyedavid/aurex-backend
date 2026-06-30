@@ -1,7 +1,6 @@
 import { WithTransaction } from "../../utils/mongooose-transactions.js";
 import { BusinessMemberRepository } from "../business-member/business-member.repository.js";
 import { RoleRepository } from "../role/role.repository.js";
-import { systemRolePermissions } from "../role/role.model.js";
 import { BusinessRepository } from "./business.repository.js";
 import {
   CreateBusinessInput,
@@ -91,17 +90,14 @@ const createBusinessService = ({
       const business = await businessRepository.createBusiness(createData, {
         session: mongoSession,
       });
-      const ownerRole = await roleRepository.createRole(
-        {
-          businessId: business.id,
-          name: "Owner",
+      const ownerRole = await roleRepository.findSystemRoleByKey("owner");
 
-          type: "system",
-          key: "owner",
-          permissions: systemRolePermissions.owner,
-        },
-        { session: mongoSession },
-      );
+      if (!ownerRole) {
+        throw createHttpError(
+          "System roles are not seeded. Run the system-role seed first",
+          500,
+        );
+      }
 
       await businessMemberRepository.createBusinessMember(
         {

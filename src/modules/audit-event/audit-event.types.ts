@@ -2,7 +2,7 @@ import { ClientSession } from "mongoose";
 import {
   LocationMetadata,
   RequestMetadata,
-} from "../../repositories/repository-types.js";
+} from "../../types/repository-types.js";
 import { NotificationSeverity } from "../notification/notification.types.js";
 import { CreateAuditEventPayload } from "./audit-event.model.js";
 
@@ -22,9 +22,26 @@ export type RecordSecurityEvent = {
     | "account.password_reset.succeeded"
     | "auth.logout"
     | "auth.sessions.revoked_all_others"
-    | "auth.session.revoked";
+    | "auth.session.revoked"
+    | "business.invite.created"
+    | "business.invite.resent"
+    | "business.invite.revoked"
+    | "business.invite.accepted"
+    | "business.invite.declined"
+    | "business.invite.approval_requested"
+    | "business.invite.approved"
+    | "business.invite.approval_rejected"
+    | "business.membership.activated"
+    | "business.member.role_updated"
+    | "business.member.status_updated"
+    | "business.member.removed";
 
-  category: "security" | "authentication" | "account" | "session";
+  category:
+    | "security"
+    | "authentication"
+    | "account"
+    | "session"
+    | "business";
   outcome: "blocked" | "failure" | "success";
   severity?: NotificationSeverity;
   userId: string | null;
@@ -43,14 +60,19 @@ export type RecordSecurityEvent = {
     method?: string;
     path?: string;
     revokedCount?: string | number;
+    businessId?: string;
+    inviteId?: string;
+    roleId?: string;
+    memberId?: string;
+    status?: string;
   };
   requestMetadata?: Partial<RequestMetadata>;
   location?: Partial<LocationMetadata>;
-  notification?: Partial<{
+  notification?: {
     title: string;
     message: string;
-    severity: NotificationSeverity;
-  }>;
+    severity?: NotificationSeverity;
+  };
   mongoSession?: ClientSession | null;
   changes?: CreateAuditEventPayload["changes"];
 };

@@ -6,7 +6,7 @@ import {
 } from "./employee-list.types.js";
 import type { EmployeeService } from "../employee/employee.service.js";
 import type { WithTransaction } from "../../utils/mongooose-transactions.js";
-import type { RepositoryOptions } from "../../repositories/repository-types.js";
+import type { RepositoryOptions } from "../../types/repository-types.js";
 import type { HttpError } from "../../utils/api-error.js";
 
 type CreateEmployeeListServiceDependencies = {
@@ -26,7 +26,10 @@ const createEmployeeListService = ({
     {
       employees = [],
       ...listInput
-    }: CreateEmployeeListInput & { businessId: string; createdByUserId: string },
+    }: CreateEmployeeListInput & {
+      businessId: string;
+      createdByUserId: string;
+    },
     options: RepositoryOptions = {},
   ) => {
     const employeeCount = employees.length;

@@ -1,4 +1,4 @@
-import { RepositoryOptions } from "../../repositories/repository-types.js";
+import { RepositoryOptions } from "../../types/repository-types.js";
 import { Notification } from "./notification.model.js";
 import {
   CreateNotificationPayload,
@@ -10,13 +10,17 @@ const createNotification = (
   payload: CreateNotificationPayload,
   options: RepositoryOptions = {},
 ) =>
-  Notification.create([payload], options).then(
-    ([notification]) => notification,
-  );
+  Notification.create([payload], options).then(([notification]) => {
+    if (!notification) {
+      throw new Error("Failed to create notification");
+    }
 
-const findNotificationsByUserId = (
+    return notification;
+  });
+
+const paginateNotificationsByUserId = async (
   userId: string,
-  { limit = 50, unreadOnly, ...options }: FindNotificationsOptions = {},
+  { page, limit, unreadOnly, ...options }: FindNotificationsOptions,
 ) => {
   const filter: NotificationFilter = { userId };
 
@@ -24,9 +28,16 @@ const findNotificationsByUserId = (
     filter.readAt = null;
   }
 
-  return Notification.find(filter, null, options)
-    .sort({ createdAt: -1 })
-    .limit(limit);
+  const [items, total, unreadCount] = await Promise.all([
+    Notification.find(filter, null, options)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Notification.countDocuments(filter),
+    Notification.countDocuments({ userId, readAt: null }),
+  ]);
+
+  return { items, total, unreadCount };
 };
 
 const markNotificationRead = (
@@ -36,8 +47,8 @@ const markNotificationRead = (
 ) =>
   Notification.findOneAndUpdate(
     { _id: notificationId, userId },
-    { readAt: new Date() },
-    { new: true, ...options },
+    [{ $set: { readAt: { $ifNull: ["$readAt", "$$NOW"] } } }],
+    { returnDocument: "after", updatePipeline: true, ...options },
   );
 
 const markAllNotificationsRead = (
@@ -46,15 +57,15 @@ const markAllNotificationsRead = (
 ) =>
   Notification.updateMany(
     { userId, readAt: null },
-    { readAt: new Date() },
+    { $set: { readAt: new Date() } },
     options,
   );
 
 export const notificationRepository = {
   createNotification,
-  findNotificationsByUserId,
   markAllNotificationsRead,
   markNotificationRead,
+  paginateNotificationsByUserId,
 };
 
 export type NotificationRepository = typeof notificationRepository;
