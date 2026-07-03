@@ -61,7 +61,7 @@ const createEmailDeliveryWorker = ({
 
       const resolution = await emailService.sendBusinessInviteEmail({
         // to: invite.email,
-        to: "okoyedav7@gmail.com",
+        to: user.email,
         recipientName: user ? user.name : null,
         inviterName: invite.invitedByUserId.name,
         businessName: invite.businessId.name,
