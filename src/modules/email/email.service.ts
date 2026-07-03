@@ -214,7 +214,10 @@ const createEmailService = ({
     expiresAt,
   }: SendBusinessInviteEmailPayload) => {
     if (!to || !inviterName || !businessName || !roleName || !inviteUrl) {
-      throw createHttpError("Business invitation email data is incomplete", 500);
+      throw createHttpError(
+        "Business invitation email data is incomplete",
+        500,
+      );
     }
 
     if (!(expiresAt instanceof Date) || Number.isNaN(expiresAt.getTime())) {
@@ -269,6 +272,7 @@ const createEmailService = ({
 
   return {
     sendBusinessInviteEmail,
+    provider,
     sendVerificationOtpEmail,
   };
 };

@@ -1,8 +1,13 @@
+import { UpdateQuery } from "mongoose";
 import { RepositoryOptions } from "../../types/repository-types.js";
-import { BusinessInvite } from "./business-invite.model.js";
+import {
+  BusinessInvite,
+  BusinessInviteDocument,
+} from "./business-invite.model.js";
 import {
   InvitePaginationInput,
   PersistBusinessInvitePayload,
+  PopulatedBusinessInviteDocument,
 } from "./business-invite.types.js";
 
 const invitePopulations = [
@@ -48,10 +53,7 @@ const createBusinessInvite = (
     return invite;
   });
 
-const findOpenInviteByBusinessAndEmail = (
-  businessId: string,
-  email: string,
-) =>
+const findOpenInviteByBusinessAndEmail = (businessId: string, email: string) =>
   BusinessInvite.findOne({
     businessId,
     email,
@@ -61,7 +63,10 @@ const findOpenInviteByBusinessAndEmail = (
     ],
   });
 
-const expirePendingInvites = (filter: { businessId?: string; email?: string }) =>
+const expirePendingInvites = (filter: {
+  businessId?: string;
+  email?: string;
+}) =>
   BusinessInvite.updateMany(
     {
       ...filter,
@@ -260,8 +265,64 @@ const countOpenInvitesByRole = (businessId: string, roleId: string) =>
     ],
   });
 
+const claimNextDelivery =
+  async (): Promise<PopulatedBusinessInviteDocument | null> => {
+    const now = new Date();
+    const staleCutoff = new Date(Date.now() - 15 * 60_000);
+
+    const invite = await BusinessInvite.findOneAndUpdate(
+      {
+        status: "pending",
+        expiresAt: { $gt: now },
+        approvalStatus: { $in: ["not_required", "approved"] },
+        $or: [
+          {
+            emailDeliveryStatus: { $in: ["pending", "retrying"] },
+            $or: [
+              { nextDeliveryAttempt: null },
+              { nextDeliveryAttempt: { $exists: false } },
+              { nextDeliveryAttempt: { $lte: now } },
+            ],
+          },
+          {
+            emailDeliveryStatus: "processing",
+            emailProcessingStartedAt: { $lte: staleCutoff },
+          },
+        ],
+      },
+      {
+        $set: {
+          emailDeliveryStatus: "processing",
+          emailProcessingStartedAt: now,
+          lastEmailAttemptAt: now,
+        },
+        $inc: {
+          emailDeliveryAttempts: 1,
+        },
+      },
+      {
+        returnDocument: "after",
+        sort: { createdAt: 1 },
+      },
+    )
+      .populate(invitePopulations)
+      .exec();
+
+    return invite as PopulatedBusinessInviteDocument | null;
+  };
+
+const updateDeliveryResult = (
+  inviteId: string,
+  payload: UpdateQuery<BusinessInviteDocument>,
+) =>
+  BusinessInvite.findByIdAndUpdate(inviteId, payload, {
+    returnDocument: "after",
+  });
+
 export const businessInviteRepository = {
   acceptPendingInvite,
+  updateDeliveryResult,
+  claimNextDelivery,
   approveInvite,
   createBusinessInvite,
   countOpenInvitesByRole,

@@ -119,7 +119,14 @@ const businessInviteSchema = new mongoose.Schema(
 
     emailDeliveryStatus: {
       type: String,
-      enum: ["pending", "retrying", "sent", "failed"],
+      enum: [
+        "pending",
+        "retrying",
+        "sent",
+        "failed",
+        "exhausted",
+        "processing",
+      ],
       default: "pending",
       required: true,
       index: true,
@@ -130,13 +137,22 @@ const businessInviteSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
-
+    emailProcessingStartedAt: {
+      type: Date,
+      default: null,
+      index: true,
+    },
     lastEmailAttemptAt: {
       type: Date,
       default: null,
     },
 
     emailDeliveredAt: {
+      type: Date,
+      default: null,
+    },
+
+    nextDeliveryAttempt: {
       type: Date,
       default: null,
     },
@@ -184,6 +200,13 @@ businessInviteSchema.index(
     partialFilterExpression: { status: "pending" },
   },
 );
+businessInviteSchema.index({
+  status: 1,
+  approvalStatus: 1,
+  emailDeliveryStatus: 1,
+  nextDeliveryAttempt: 1,
+  createdAt: 1,
+});
 
 export type BusinessInviteDocument = InferSchemaType<
   typeof businessInviteSchema
