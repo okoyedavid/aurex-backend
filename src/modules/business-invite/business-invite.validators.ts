@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { employeeInputSchema } from "../employee/employee.validators.js";
 
 const objectIdSchema = z
   .string()
@@ -26,6 +27,17 @@ const createBusinessInviteSchema = z.object({
     .object({
       email: z.string().trim().toLowerCase().email(),
       roleId: objectIdSchema,
+      type: z.enum(["MEMBER", "EMPLOYEE"]).default("MEMBER"),
+      employeeId: objectIdSchema.nullable().optional(),
+    })
+    .superRefine((body, context) => {
+      if (body.type === "MEMBER" && body.employeeId) {
+        context.addIssue({
+          code: "custom",
+          message: "A member invitation cannot reference an employee",
+          path: ["employeeId"],
+        });
+      }
     })
     .strict(),
   params: z.object({ businessId: objectIdSchema }).strict(),
@@ -62,7 +74,15 @@ const listPendingInviteApprovalsSchema = z.object({
 });
 
 const respondToInviteApprovalSchema = z.object({
-  body: z.object({}).strict().optional(),
+  body: z
+    .object({
+      employee: employeeInputSchema
+        .extend({ employeeListId: objectIdSchema })
+        .optional(),
+    })
+    .strict()
+    .optional()
+    .default({}),
   params: z
     .object({
       businessId: objectIdSchema,

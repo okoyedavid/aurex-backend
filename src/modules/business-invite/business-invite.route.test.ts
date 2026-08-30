@@ -8,6 +8,8 @@ import { User } from "../users/user.models.js";
 import { BusinessInvite } from "./business-invite.model.js";
 import { Notification } from "../notification/notification.model.js";
 import { AuditEvent } from "../audit-event/audit-event.model.js";
+import { Employee } from "../employee/employee.model.js";
+import { EmployeeList } from "../employee-list/employee-list.model.js";
 
 describe("business invitation routes", () => {
   const password = "Password123!";
@@ -16,18 +18,34 @@ describe("business invitation routes", () => {
   const rejectedEmail = `invite-rejected-${crypto.randomUUID()}@test.local`;
   const delegatedEmail = `invite-delegated-${crypto.randomUUID()}@test.local`;
   const approvalEmail = `invite-approval-${crypto.randomUUID()}@test.local`;
+  const directEmployeeEmail = `invite-direct-employee-${crypto.randomUUID()}@test.local`;
+  const ownerCreatedEmployeeEmail = `invite-owner-created-employee-${crypto.randomUUID()}@test.local`;
+  const delegatedEmployeeEmail = `invite-delegated-employee-${crypto.randomUUID()}@test.local`;
+  const delegatedCreatedEmployeeEmail = `invite-delegated-created-employee-${crypto.randomUUID()}@test.local`;
+  const existingMemberEmployeeEmail = `invite-existing-member-employee-${crypto.randomUUID()}@test.local`;
   const ownerAgent = request.agent(app);
   const recipientAgent = request.agent(app);
   const rejectedAgent = request.agent(app);
   const delegatedAgent = request.agent(app);
   const approvalAgent = request.agent(app);
+  const directEmployeeAgent = request.agent(app);
+  const ownerCreatedEmployeeAgent = request.agent(app);
+  const delegatedEmployeeAgent = request.agent(app);
+  const delegatedCreatedEmployeeAgent = request.agent(app);
+  const existingMemberEmployeeAgent = request.agent(app);
   let businessId: string;
   let recipientUserId: string;
   let ownerUserId: string;
   let rejectedUserId: string;
   let delegatedUserId: string;
   let approvalUserId: string;
+  let directEmployeeUserId: string;
+  let ownerCreatedEmployeeUserId: string;
+  let delegatedEmployeeUserId: string;
+  let delegatedCreatedEmployeeUserId: string;
+  let existingMemberEmployeeUserId: string;
   let viewerRoleId: string;
+  let employeeListId: string;
 
   const registerAndLogin = async (
     agent: ReturnType<typeof request.agent>,
@@ -80,25 +98,78 @@ describe("business invitation routes", () => {
     await registerAndLogin(rejectedAgent, "Rejected Recipient", rejectedEmail);
     await registerAndLogin(delegatedAgent, "Delegated Inviter", delegatedEmail);
     await registerAndLogin(approvalAgent, "Approval Recipient", approvalEmail);
+    await registerAndLogin(
+      directEmployeeAgent,
+      "Direct Employee Recipient",
+      directEmployeeEmail,
+    );
+    await registerAndLogin(
+      ownerCreatedEmployeeAgent,
+      "Owner Created Employee Recipient",
+      ownerCreatedEmployeeEmail,
+    );
+    await registerAndLogin(
+      delegatedEmployeeAgent,
+      "Delegated Employee Recipient",
+      delegatedEmployeeEmail,
+    );
+    await registerAndLogin(
+      delegatedCreatedEmployeeAgent,
+      "Delegated Created Employee Recipient",
+      delegatedCreatedEmployeeEmail,
+    );
+    await registerAndLogin(
+      existingMemberEmployeeAgent,
+      "Existing Member Employee Recipient",
+      existingMemberEmployeeEmail,
+    );
 
-    const [owner, recipient, rejected, delegated, approvalRecipient] =
+    const [
+      owner,
+      recipient,
+      rejected,
+      delegated,
+      approvalRecipient,
+      directEmployeeRecipient,
+      ownerCreatedEmployeeRecipient,
+      delegatedEmployeeRecipient,
+      delegatedCreatedEmployeeRecipient,
+      existingMemberEmployeeRecipient,
+    ] =
       await Promise.all([
-      User.findOne({ email: ownerEmail }),
-      User.findOne({ email: recipientEmail }),
-      User.findOne({ email: rejectedEmail }),
+        User.findOne({ email: ownerEmail }),
+        User.findOne({ email: recipientEmail }),
+        User.findOne({ email: rejectedEmail }),
         User.findOne({ email: delegatedEmail }),
         User.findOne({ email: approvalEmail }),
+        User.findOne({ email: directEmployeeEmail }),
+        User.findOne({ email: ownerCreatedEmployeeEmail }),
+        User.findOne({ email: delegatedEmployeeEmail }),
+        User.findOne({ email: delegatedCreatedEmployeeEmail }),
+        User.findOne({ email: existingMemberEmployeeEmail }),
       ]);
     expect(owner).not.toBeNull();
     expect(recipient).not.toBeNull();
     expect(rejected).not.toBeNull();
     expect(delegated).not.toBeNull();
     expect(approvalRecipient).not.toBeNull();
+    expect(directEmployeeRecipient).not.toBeNull();
+    expect(ownerCreatedEmployeeRecipient).not.toBeNull();
+    expect(delegatedEmployeeRecipient).not.toBeNull();
+    expect(delegatedCreatedEmployeeRecipient).not.toBeNull();
+    expect(existingMemberEmployeeRecipient).not.toBeNull();
     ownerUserId = owner!._id.toString();
     recipientUserId = recipient!._id.toString();
     rejectedUserId = rejected!._id.toString();
     delegatedUserId = delegated!._id.toString();
     approvalUserId = approvalRecipient!._id.toString();
+    directEmployeeUserId = directEmployeeRecipient!._id.toString();
+    ownerCreatedEmployeeUserId = ownerCreatedEmployeeRecipient!._id.toString();
+    delegatedEmployeeUserId = delegatedEmployeeRecipient!._id.toString();
+    delegatedCreatedEmployeeUserId =
+      delegatedCreatedEmployeeRecipient!._id.toString();
+    existingMemberEmployeeUserId =
+      existingMemberEmployeeRecipient!._id.toString();
 
     const response = await ownerAgent.post("/api/businesses").send({
       name: `Invite Business ${Date.now()}`,
@@ -106,6 +177,15 @@ describe("business invitation routes", () => {
     });
     expect(response.status).toBe(201);
     businessId = response.body.data.id;
+
+    const employeeList = await EmployeeList.create({
+      businessId,
+      name: `Invite Employees ${Date.now()}`,
+      currency: "NGN",
+      defaultPayFrequency: "monthly",
+      createdByUserId: ownerUserId,
+    });
+    employeeListId = employeeList._id.toString();
 
     const delegatedRole = await Role.create({
       businessId,
@@ -133,6 +213,8 @@ describe("business invitation routes", () => {
   afterAll(async () => {
     await Promise.all([
       BusinessInvite.deleteMany({ businessId }),
+      Employee.deleteMany({ businessId }),
+      EmployeeList.deleteMany({ businessId }),
       BusinessMember.deleteMany({ businessId }),
       Role.deleteMany({ businessId }),
       Business.deleteOne({ _id: businessId }),
@@ -144,6 +226,11 @@ describe("business invitation routes", () => {
             rejectedUserId,
             delegatedUserId,
             approvalUserId,
+            directEmployeeUserId,
+            ownerCreatedEmployeeUserId,
+            delegatedEmployeeUserId,
+            delegatedCreatedEmployeeUserId,
+            existingMemberEmployeeUserId,
           ],
         },
       }),
@@ -155,6 +242,11 @@ describe("business invitation routes", () => {
             rejectedUserId,
             delegatedUserId,
             approvalUserId,
+            directEmployeeUserId,
+            ownerCreatedEmployeeUserId,
+            delegatedEmployeeUserId,
+            delegatedCreatedEmployeeUserId,
+            existingMemberEmployeeUserId,
           ],
         },
       }),
@@ -166,6 +258,11 @@ describe("business invitation routes", () => {
             rejectedEmail,
             delegatedEmail,
             approvalEmail,
+            directEmployeeEmail,
+            ownerCreatedEmployeeEmail,
+            delegatedEmployeeEmail,
+            delegatedCreatedEmployeeEmail,
+            existingMemberEmployeeEmail,
           ],
         },
       }),
@@ -435,5 +532,252 @@ describe("business invitation routes", () => {
     expect(
       await BusinessMember.exists({ businessId, userId: rejectedUserId }),
     ).toBeNull();
+  });
+
+  it("accepts an employee invite directly when the inviter can assign and link it", async () => {
+    const employee = await Employee.create({
+      businessId,
+      employeeListId,
+      fullName: "Direct Employee",
+      jobTitle: "Analyst",
+      bankCode: "058",
+      bankName: "Test Bank",
+      accountNumber: "1000000001",
+      amount: 150_000,
+      currency: "NGN",
+      payFrequency: "monthly",
+    });
+
+    const createResponse = await ownerAgent
+      .post(`/api/businesses/${businessId}/invites`)
+      .send({
+        email: directEmployeeEmail,
+        roleId: viewerRoleId,
+        type: "EMPLOYEE",
+        employeeId: employee._id.toString(),
+      });
+    expect(createResponse.status).toBe(201);
+
+    const acceptResponse = await directEmployeeAgent.post(
+      `/api/me/business-invites/${createResponse.body.data.id}/accept`,
+    );
+    expect(acceptResponse.status).toBe(200);
+    expect(acceptResponse.body.data.approvalStatus).toBe("not_required");
+    expect(acceptResponse.body.meta.membershipCreated).toBe(true);
+    expect(acceptResponse.body.meta.membershipActivated).toBe(true);
+    expect(acceptResponse.body.meta.requiresApproval).toBe(false);
+
+    const membership = await BusinessMember.findOne({
+      businessId,
+      userId: directEmployeeUserId,
+    });
+    expect(membership).not.toBeNull();
+    expect((await Employee.findById(employee._id))?.businessMemberId?.toString()).toBe(
+      membership!._id.toString(),
+    );
+  });
+
+  it("requires employee details at approval even when the inviter can assign the role", async () => {
+    const createResponse = await ownerAgent
+      .post(`/api/businesses/${businessId}/invites`)
+      .send({
+        email: ownerCreatedEmployeeEmail,
+        roleId: viewerRoleId,
+        type: "EMPLOYEE",
+      });
+    expect(createResponse.status).toBe(201);
+
+    const inviteId = createResponse.body.data.id as string;
+    const acceptResponse = await ownerCreatedEmployeeAgent.post(
+      `/api/me/business-invites/${inviteId}/accept`,
+    );
+    expect(acceptResponse.status).toBe(200);
+    expect(acceptResponse.body.data.approvalStatus).toBe("pending");
+    expect(acceptResponse.body.meta.membershipCreated).toBe(false);
+    expect(acceptResponse.body.meta.membershipActivated).toBe(false);
+    expect(acceptResponse.body.meta.requiresApproval).toBe(true);
+
+    const missingEmployeeResponse = await ownerAgent.post(
+      `/api/businesses/${businessId}/invites/${inviteId}/approve`,
+    );
+    expect(missingEmployeeResponse.status).toBe(400);
+
+    const approvalResponse = await ownerAgent
+      .post(`/api/businesses/${businessId}/invites/${inviteId}/approve`)
+      .send({
+        employee: {
+          employeeListId,
+          fullName: "Owner Created Employee",
+          jobTitle: "Intern",
+          bankCode: "058",
+          bankName: "Test Bank",
+          accountNumber: "1000000002",
+          amount: 75_000,
+          currency: "NGN",
+          payFrequency: "monthly",
+        },
+      });
+    expect(approvalResponse.status).toBe(200);
+    expect(approvalResponse.body.data.approvalStatus).toBe("approved");
+
+    const membership = await BusinessMember.findOne({
+      businessId,
+      userId: ownerCreatedEmployeeUserId,
+    });
+    const employee = await Employee.findOne({
+      businessId,
+      businessMemberId: membership?._id,
+    });
+    expect(membership).not.toBeNull();
+    expect(employee?.fullName).toBe("Owner Created Employee");
+    expect(approvalResponse.body.data.employeeId.id).toBe(
+      employee!._id.toString(),
+    );
+  });
+
+  it("requires approval to link an existing employee when the inviter cannot assign the role", async () => {
+    const employee = await Employee.create({
+      businessId,
+      employeeListId,
+      fullName: "Delegated Existing Employee",
+      bankCode: "058",
+      bankName: "Test Bank",
+      accountNumber: "1000000003",
+      amount: 90_000,
+      currency: "NGN",
+    });
+    const createResponse = await delegatedAgent
+      .post(`/api/businesses/${businessId}/invites`)
+      .send({
+        email: delegatedEmployeeEmail,
+        roleId: viewerRoleId,
+        type: "EMPLOYEE",
+        employeeId: employee._id.toString(),
+      });
+    expect(createResponse.status).toBe(201);
+
+    const inviteId = createResponse.body.data.id as string;
+    const acceptResponse = await delegatedEmployeeAgent.post(
+      `/api/me/business-invites/${inviteId}/accept`,
+    );
+    expect(acceptResponse.status).toBe(200);
+    expect(acceptResponse.body.data.approvalStatus).toBe("pending");
+    expect((await Employee.findById(employee._id))?.businessMemberId).toBeNull();
+
+    const pendingResponse = await ownerAgent.get(
+      `/api/businesses/${businessId}/invites/pending-approval`,
+    );
+    const pendingInvite = pendingResponse.body.data.items.find(
+      (invite: { id: string }) => invite.id === inviteId,
+    );
+    expect(pendingInvite.employeeId).toMatchObject({
+      id: employee._id.toString(),
+      fullName: "Delegated Existing Employee",
+    });
+
+    const approvalResponse = await ownerAgent.post(
+      `/api/businesses/${businessId}/invites/${inviteId}/approve`,
+    );
+    expect(approvalResponse.status).toBe(200);
+    const membership = await BusinessMember.findOne({
+      businessId,
+      userId: delegatedEmployeeUserId,
+    });
+    expect((await Employee.findById(employee._id))?.businessMemberId?.toString()).toBe(
+      membership!._id.toString(),
+    );
+  });
+
+  it("creates the employee during approval when neither role nor employee setup was delegated", async () => {
+    const createResponse = await delegatedAgent
+      .post(`/api/businesses/${businessId}/invites`)
+      .send({
+        email: delegatedCreatedEmployeeEmail,
+        roleId: viewerRoleId,
+        type: "EMPLOYEE",
+      });
+    expect(createResponse.status).toBe(201);
+
+    const inviteId = createResponse.body.data.id as string;
+    const acceptResponse = await delegatedCreatedEmployeeAgent.post(
+      `/api/me/business-invites/${inviteId}/accept`,
+    );
+    expect(acceptResponse.status).toBe(200);
+    expect(acceptResponse.body.data.approvalStatus).toBe("pending");
+
+    const approvalResponse = await ownerAgent
+      .post(`/api/businesses/${businessId}/invites/${inviteId}/approve`)
+      .send({
+        employee: {
+          employeeListId,
+          fullName: "Delegated Created Employee",
+          bankCode: "058",
+          bankName: "Test Bank",
+          accountNumber: "1000000004",
+          amount: 80_000,
+        },
+      });
+    expect(approvalResponse.status).toBe(200);
+
+    const membership = await BusinessMember.findOne({
+      businessId,
+      userId: delegatedCreatedEmployeeUserId,
+    });
+    expect(
+      await Employee.exists({
+        businessId,
+        businessMemberId: membership?._id,
+        fullName: "Delegated Created Employee",
+      }),
+    ).not.toBeNull();
+  });
+
+  it("links an employee to an existing member without replacing their role", async () => {
+    const membership = await BusinessMember.create({
+      businessId,
+      userId: existingMemberEmployeeUserId,
+      roleId: viewerRoleId,
+      invitedByUserId: ownerUserId,
+    });
+    const employee = await Employee.create({
+      businessId,
+      employeeListId,
+      fullName: "Existing Member Employee",
+      jobTitle: "Intern",
+      bankCode: "058",
+      bankName: "Test Bank",
+      accountNumber: "1000000005",
+      amount: 60_000,
+      currency: "NGN",
+    });
+
+    const createResponse = await ownerAgent
+      .post(`/api/businesses/${businessId}/invites`)
+      .send({
+        email: existingMemberEmployeeEmail,
+        roleId: viewerRoleId,
+        type: "EMPLOYEE",
+        employeeId: employee._id.toString(),
+      });
+    expect(createResponse.status).toBe(201);
+
+    const acceptResponse = await existingMemberEmployeeAgent.post(
+      `/api/me/business-invites/${createResponse.body.data.id}/accept`,
+    );
+    expect(acceptResponse.status).toBe(200);
+    expect(acceptResponse.body.data.approvalStatus).toBe("not_required");
+    expect(acceptResponse.body.meta.membershipCreated).toBe(false);
+    expect(acceptResponse.body.meta.membershipActivated).toBe(true);
+
+    const memberships = await BusinessMember.find({
+      businessId,
+      userId: existingMemberEmployeeUserId,
+    });
+    expect(memberships).toHaveLength(1);
+    expect(memberships[0]._id.toString()).toBe(membership._id.toString());
+    expect(memberships[0].roleId.toString()).toBe(viewerRoleId);
+    expect((await Employee.findById(employee._id))?.businessMemberId?.toString()).toBe(
+      membership._id.toString(),
+    );
   });
 });

@@ -44,11 +44,13 @@ export type CreateEmployeeInput = {
 export type CreateEmployeePayload = CreateEmployeeInput & {
   businessId: string;
   employeeListId: string;
+  businessMemberId?: string | null;
 };
 
 export type UpdateEmployeePayload = Partial<{
   employeeListId: string;
   fullName: string;
+  businessMemberId: string;
   jobTitle: string | null;
   bankCode: string;
   bankName: string;

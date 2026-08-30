@@ -7,10 +7,14 @@ import { auditEventService } from "../audit-event/audit-event.module.js";
 import { createBusinessInviteController } from "./business-invite.controller.js";
 import { businessInviteRepository } from "./business-invite.repository.js";
 import { createBusinessInviteService } from "./business-invite.service.js";
+import { employeeRepository } from "../employee/employee.repository.js";
+import { employeeService } from "../employee/employee.module.js";
 
 const businessInviteService = createBusinessInviteService({
   businessInviteRepository,
   businessMemberRepository,
+  employeeRepository,
+  employeeService,
   roleRepository,
   userRepository,
   auditEventService,

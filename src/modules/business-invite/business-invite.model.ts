@@ -9,6 +9,19 @@ const businessInviteSchema = new mongoose.Schema(
       index: true,
     },
 
+    type: {
+      type: String,
+      required: true,
+      default: "MEMBER",
+      enum: ["MEMBER", "EMPLOYEE"],
+    },
+
+    employeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+      index: true,
+    },
     email: {
       type: String,
       required: true,

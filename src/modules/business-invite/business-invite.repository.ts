@@ -39,6 +39,11 @@ const invitePopulations = [
     path: "approvalRejectedByUserId",
     select: "name email avatar",
   },
+  {
+    path: "employeeId",
+    select:
+      "fullName jobTitle employeeListId businessMemberId status accountVerificationStatus",
+  },
 ];
 
 const createBusinessInvite = (
@@ -57,6 +62,19 @@ const findOpenInviteByBusinessAndEmail = (businessId: string, email: string) =>
   BusinessInvite.findOne({
     businessId,
     email,
+    $or: [
+      { status: "pending" },
+      { status: "accepted", approvalStatus: "pending" },
+    ],
+  });
+
+const findOpenInviteByBusinessAndEmployee = (
+  businessId: string,
+  employeeId: string,
+) =>
+  BusinessInvite.findOne({
+    businessId,
+    employeeId,
     $or: [
       { status: "pending" },
       { status: "accepted", approvalStatus: "pending" },
@@ -196,6 +214,7 @@ const approveInvite = (
   businessId: string,
   inviteId: string,
   approvedByUserId: string,
+  employeeId: string | null,
   options: RepositoryOptions = {},
 ) =>
   BusinessInvite.findOneAndUpdate(
@@ -206,9 +225,12 @@ const approveInvite = (
       approvalStatus: "pending",
     },
     {
-      approvalStatus: "approved",
-      approvedByUserId,
-      approvedAt: new Date(),
+      $set: {
+        approvalStatus: "approved",
+        approvedByUserId,
+        approvedAt: new Date(),
+        ...(employeeId ? { employeeId } : {}),
+      },
     },
     { returnDocument: "after", session: options.session },
   );
@@ -331,6 +353,7 @@ export const businessInviteRepository = {
   findInviteByIdForRecipient,
   findPendingApprovalInvite,
   findOpenInviteByBusinessAndEmail,
+  findOpenInviteByBusinessAndEmployee,
   markInviteExpired,
   paginateBusinessInvitesByBusinessId,
   paginateBusinessInvitesByEmail,

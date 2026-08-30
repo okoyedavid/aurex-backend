@@ -1,11 +1,15 @@
 import type { HydratedDocument, Types } from "mongoose";
 import type { BusinessInviteDocument } from "./business-invite.model.js";
+import type { CreateEmployeeInput } from "../employee/employee.types.js";
 
 export type CreateBusinessInvitePayload = {
   businessId: string;
   invitedByUserId: string;
   email: string;
   roleId: string;
+
+  type?: "MEMBER" | "EMPLOYEE";
+  employeeId?: string | null;
 };
 
 export type PersistBusinessInvitePayload = CreateBusinessInvitePayload & {
@@ -33,6 +37,10 @@ export type InvitePaginationInput = {
   status?: BusinessInviteStatus;
 };
 
+export type ApproveInviteEmployeeInput = CreateEmployeeInput & {
+  employeeListId: string;
+};
+
 type PopulatedUserRef = {
   _id: Types.ObjectId;
   name: string;
@@ -56,11 +64,22 @@ type PopulatedRoleRef = {
   deniedPermissions: string[];
 };
 
+type PopulatedEmployeeRef = {
+  _id: Types.ObjectId;
+  fullName: string;
+  jobTitle?: string;
+  employeeListId: Types.ObjectId;
+  businessMemberId?: Types.ObjectId | null;
+  status: string;
+  accountVerificationStatus: string;
+};
+
 export type PopulatedBusinessInviteDocument = Omit<
   HydratedDocument<BusinessInviteDocument>,
-  "businessId" | "roleId" | "invitedByUserId"
+  "businessId" | "roleId" | "invitedByUserId" | "employeeId"
 > & {
   businessId: PopulatedBusinessRef;
   roleId: PopulatedRoleRef;
   invitedByUserId: PopulatedUserRef;
+  employeeId: PopulatedEmployeeRef | null;
 };

@@ -2,8 +2,6 @@ import "dotenv/config";
 import mongoose from "mongoose";
 import { Role, systemRolePermissions } from "../src/modules/role/role.model";
 
-import { BusinessMember } from "../src/modules/business-member/business-member.model";
-
 const systemRoles = [
   {
     name: "Owner",
@@ -35,6 +33,8 @@ const systemRoles = [
     key: "viewer",
     type: "system",
   },
+
+  { name: "Employee", key: "employee", type: "system" },
 ] as const;
 
 async function seedSystemRoles() {
