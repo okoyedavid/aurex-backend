@@ -3,6 +3,7 @@ import type { RepositoryOptions } from "../../types/repository-types.js";
 import type { EmployeeListRepository } from "../employee-list/employee-list.repository.js";
 import type { WithTransaction } from "../../utils/mongooose-transactions.js";
 import type { HttpError } from "../../utils/api-error.js";
+import type { ClientSession } from "mongoose";
 import {
   CreateEmployeePayload,
   UpdateEmployeeInput,
@@ -38,9 +39,13 @@ const createEmployeeService = ({
     return { employee };
   };
 
-  const createEmployeeForList = async (payload: CreateEmployeePayload) => {
+  const createEmployeeForListInSession = async (
+    payload: CreateEmployeePayload,
+    session: ClientSession,
+  ) => {
     const employeeList = await employeeListRepository.findEmployeeListById(
       payload.employeeListId,
+      { session },
     );
 
     if (
@@ -50,21 +55,24 @@ const createEmployeeService = ({
       throw createHttpError("Employee list not found in this business", 404);
     }
 
-    return withTransaction(async (session) => {
-      const result = await createEmployee(payload, { session });
-      await employeeListRepository.updateEmployeeListById(
-        payload.employeeListId,
-        {
-          validationStatus: "pending",
-          paymentStatus: "needs_review",
-          totalEmployeeCount: employeeList.totalEmployeeCount + 1,
-          pendingVerificationCount: employeeList.pendingVerificationCount + 1,
-        },
-        { session },
-      );
-      return result;
-    });
+    const result = await createEmployee(payload, { session });
+    await employeeListRepository.updateEmployeeListById(
+      payload.employeeListId,
+      {
+        validationStatus: "pending",
+        paymentStatus: "needs_review",
+        totalEmployeeCount: employeeList.totalEmployeeCount + 1,
+        pendingVerificationCount: employeeList.pendingVerificationCount + 1,
+      },
+      { session },
+    );
+    return result;
   };
+
+  const createEmployeeForList = async (payload: CreateEmployeePayload) =>
+    withTransaction((session) =>
+      createEmployeeForListInSession(payload, session),
+    );
 
   const requireEmployeeList = async (
     businessId: string,
@@ -209,6 +217,7 @@ const createEmployeeService = ({
   return {
     createEmployee,
     createEmployeeForList,
+    createEmployeeForListInSession,
     getEmployee,
     listEmployees,
     updateEmployee,

@@ -68,6 +68,9 @@ payment execution and invoice workflows are not implemented yet.
 ### Invitations and approval
 
 - Invitations can target registered or unregistered email addresses.
+- Invitations explicitly distinguish normal membership (`MEMBER`) from employee
+  onboarding (`EMPLOYEE`). An employee invitation may reference an existing unlinked
+  employee or leave employee creation to the approval step.
 - Recipients can view, accept, or reject their invitations after authenticating with
   the invited email address.
 - An inviter with sufficient `roles:assign` authority can create immediate membership
@@ -76,6 +79,9 @@ payment execution and invoice workflows are not implemented yet.
   state without creating membership.
 - An authorized approver must possess every effective permission in the requested
   role before approving it.
+- An existing active business member may accept an `EMPLOYEE` invitation. The
+  employee record is attached to that membership without replacing the member's
+  current role.
 - Invitation and approval events generate best-effort audit events and personal
   notifications outside the membership transaction.
 
@@ -260,18 +266,25 @@ The global system roles must be seeded before creating businesses.
 ### Invitation acceptance
 
 ```text
-Invite created for email + role
+MEMBER or EMPLOYEE invite created for email + role
   -> recipient accepts using the matching authenticated email
   -> inviter authority is re-evaluated at acceptance time
-      -> has roles:assign and permission subset passes
+      -> role and employee operations are already authorized
           -> membership created/reactivated transactionally
+          -> referenced employee linked when this is an EMPLOYEE invite
       -> otherwise
           -> invitation becomes accepted + approval pending
-          -> no membership exists yet
+          -> membership/employee changes wait for approval
 ```
 
 Rechecking at acceptance prevents stale authority from being trusted when an inviter's
 role changes after sending an invitation.
+
+An active member is not duplicated when accepting an `EMPLOYEE` invite. Their current
+membership and role are preserved. If the invite references an existing employee,
+that employee is linked to the membership. If it does not reference an employee, the
+invite enters approval so an authorized approver can choose an employee list and
+create the employee data.
 
 ### Pending approval
 
@@ -280,8 +293,29 @@ Accepted invitation awaiting approval
   -> approver must have roles:assign
   -> requested role must still exist and be active
   -> requested permissions must be a subset of approver permissions
-  -> membership created/reactivated and invite approved in one transaction
+  -> existing employee links require employees:update
+  -> missing employee data requires employees:create and an employee-list selection
+  -> membership and employee changes commit with approval in one transaction
 ```
+
+### Member-to-employee policy boundary
+
+The `Employee.businessMemberId` relationship is intentionally part of the current
+model. It is necessary to connect payroll/employment data to the authenticated
+business identity that receives permissions, while keeping employment data and
+authorization roles as separate concerns.
+
+There is currently no administrative endpoint that directly converts an existing
+business member into an employee from a member or employee detail page. For now, an
+existing member must receive and accept an `EMPLOYEE` invitation. The invitation may
+link an existing unlinked employee, or approval may create new employee data and link
+it. This workflow never changes the existing member's role.
+
+A future policy engine is intended to centralize decisions such as role boundaries,
+employee creation/link authority, approval requirements, and auditable direct-link
+operations. Until that exists, the invitation workflow is the explicit trust and
+consent boundary; bulk conversion and direct administrative linking are deliberately
+not exposed.
 
 ### Member mutation
 
@@ -776,10 +810,27 @@ Create body:
 
 ```json
 {
+  "type": "MEMBER",
   "email": "new.member@example.com",
   "roleId": "role-object-id"
 }
 ```
+
+An employee invite can reference an existing unlinked employee:
+
+```json
+{
+  "type": "EMPLOYEE",
+  "email": "employee@example.com",
+  "roleId": "role-object-id",
+  "employeeId": "employee-object-id"
+}
+```
+
+Omit `employeeId` when employee data should be created during approval. For an
+existing employee, the frontend may first select an employee list to narrow its
+paginated employee picker, but it sends only `employeeId`; the employee already
+references its list and business.
 
 The recipient must authenticate with the invited email. Accept responses include:
 
@@ -792,13 +843,17 @@ The recipient must authenticate with the invited email. Accept responses include
     "approvalStatus": "pending"
   },
   "meta": {
-    "membershipCreated": false
+    "membershipActivated": false,
+    "membershipCreated": false,
+    "requiresApproval": true
   }
 }
 ```
 
-When `membershipCreated` is false, the frontend must not grant business access
-optimistically. The accepted invitation remains pending until approval.
+The frontend should use `membershipActivated` or `requiresApproval` to determine
+workflow completion. `membershipCreated` only reports whether a new membership row
+was inserted; it is false when an existing member is linked to an employee even when
+the workflow completed successfully.
 
 Invitation status values:
 
@@ -1055,6 +1110,10 @@ Potential extensions, not requirements for the current release:
 
 - Durable invitation email worker and resend/revoke routes.
 - Token-based invite landing/acceptance endpoints.
+- A centralized policy engine for role assignment, employee linking, approval, and
+  other delegated authority decisions.
+- Audited direct and bulk member-to-employee linking endpoints. Until these exist,
+  existing members use the `EMPLOYEE` invitation workflow.
 - Ownership transfer and voluntary leave-business workflows.
 - Payment execution and approval flow.
 - Invoice management.

@@ -33,6 +33,7 @@ export const allowedPermissions = [
   "invoices:view",
   "reports:view",
   "audit_logs:view",
+  "employees:view_own",
 ] as const;
 
 export type Permission = (typeof allowedPermissions)[number];
@@ -87,6 +88,8 @@ export const systemRolePermissions = {
     "employee_lists:view",
     "employees:view",
   ],
+
+  employee: ["employees:view_own"],
   contributor: ["payments:create", "members:view", "payments:view_own"],
   viewer: ["payments:view", "invoices:view", "members:view", "reports:view"],
 } satisfies Record<string, Permission[]>;

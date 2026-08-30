@@ -8,6 +8,13 @@ const employeeSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+
+    businessMemberId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessMember",
+      default: null,
+      index: true,
+    },
     employeeListId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "EmployeeList",
@@ -90,6 +97,16 @@ employeeSchema.set("toJSON", {
     return ret;
   },
 });
+
+employeeSchema.index(
+  { businessId: 1, businessMemberId: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      businessMemberId: { $type: "objectId" },
+    },
+  },
+);
 
 employeeSchema.index({ businessId: 1, status: 1 });
 employeeSchema.index({ businessId: 1, employeeListId: 1, status: 1 });

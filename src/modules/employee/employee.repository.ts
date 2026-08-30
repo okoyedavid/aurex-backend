@@ -19,6 +19,37 @@ const createEmployee = (
     return employee;
   });
 
+const findByIdAndBusiness = (
+  employeeId: string,
+  businessId: string,
+  options: QueryOptions = {},
+) => Employee.findOne({ businessId, _id: employeeId }, null, options);
+
+const findByBusinessMember = (
+  businessId: string,
+  businessMemberId: string,
+  options: QueryOptions = {},
+) => Employee.findOne({ businessId, businessMemberId }, null, options);
+
+const claimForBusinessMember = (
+  employeeId: string,
+  businessId: string,
+  businessMemberId: string,
+  options: QueryOptions = {},
+) =>
+  Employee.findOneAndUpdate(
+    {
+      _id: employeeId,
+      businessId,
+      $or: [
+        { businessMemberId: null },
+        { businessMemberId: { $exists: false } },
+      ],
+    },
+    { $set: { businessMemberId } },
+    { returnDocument: "after", ...options },
+  );
+
 const createEmployees = (
   payloads: CreateEmployeePayload[],
   options: RepositoryOptions = {},
@@ -186,6 +217,9 @@ const deleteEmployeeById = (employeeId: string, options: QueryOptions = {}) =>
 export const employeeRepository = {
   archiveEmployeeById,
   claimNextVerification,
+  claimForBusinessMember,
+  findByIdAndBusiness,
+  findByBusinessMember,
   countVerificationStatesByEmployeeListId,
   createEmployee,
   createEmployees,

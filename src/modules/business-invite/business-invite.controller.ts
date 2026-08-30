@@ -20,9 +20,8 @@ export const createBusinessInviteController = ({
     const { businessId } = createBusinessInviteSchema.shape.params.parse(
       req.validatedParams,
     );
-    const { email, roleId } = createBusinessInviteSchema.shape.body.parse(
-      req.validatedBody,
-    );
+    const { email, roleId, type, employeeId } =
+      createBusinessInviteSchema.shape.body.parse(req.validatedBody);
 
     if (!req.user?.id) {
       return res.status(401).json({
@@ -37,6 +36,8 @@ export const createBusinessInviteController = ({
         invitedByUserId: req.user.id,
         email,
         roleId,
+        type,
+        employeeId,
       });
 
     return res.status(201).json({
@@ -100,7 +101,7 @@ export const createBusinessInviteController = ({
       });
     }
 
-    const { businessInvite, membershipCreated } =
+    const { businessInvite, membershipActivated, membershipCreated } =
       await businessInviteService.acceptBusinessInvite({
         inviteId,
         userId: req.user.id,
@@ -109,7 +110,11 @@ export const createBusinessInviteController = ({
 
     return res.status(200).json({
       data: businessInvite,
-      meta: { membershipCreated },
+      meta: {
+        membershipActivated,
+        membershipCreated,
+        requiresApproval: !membershipActivated,
+      },
       message: "Business invitation accepted",
       success: true,
     });
@@ -136,6 +141,9 @@ export const createBusinessInviteController = ({
   const approveBusinessInvite = asyncHandler(async (req, res) => {
     const { businessId, inviteId } =
       respondToInviteApprovalSchema.shape.params.parse(req.validatedParams);
+    const { employee } = respondToInviteApprovalSchema.shape.body.parse(
+      req.validatedBody,
+    );
 
     if (!req.user?.id) {
       return res.status(401).json({
@@ -149,11 +157,12 @@ export const createBusinessInviteController = ({
         businessId,
         inviteId,
         approvedByUserId: req.user.id,
+        employee,
       });
 
     return res.status(200).json({
       data: businessInvite,
-      message: "Business invitation role approved",
+      message: "Business invitation approved",
       success: true,
     });
   });
