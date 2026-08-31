@@ -22,6 +22,10 @@ export type EmployeePaymentStatus = "payable" | "blocked";
 export type CreateEmployeeInput = {
   fullName: string;
   jobTitle?: string;
+  employeeTypeId?: string | null;
+  managerEmployeeId?: string | null;
+  employmentStartDate?: Date | null;
+  state?: string | null;
   bankCode: string;
   bankName: string;
   accountNumber: string;
@@ -52,6 +56,11 @@ export type UpdateEmployeePayload = Partial<{
   fullName: string;
   businessMemberId: string;
   jobTitle: string | null;
+  employeeTypeId: string | null;
+  managerEmployeeId: string | null;
+  groupIds: string[];
+  employmentStartDate: Date | null;
+  state: string | null;
   bankCode: string;
   bankName: string;
   accountNumber: string;
@@ -76,8 +85,14 @@ export type UpdateEmployeePayload = Partial<{
 }>;
 
 export type UpdateEmployeeInput = Partial<{
+  employeeListId: string;
   fullName: string;
   jobTitle: string | null;
+  employeeTypeId: string | null;
+  managerEmployeeId: string | null;
+  groupIds: string[];
+  employmentStartDate: Date | null;
+  state: string | null;
   bankCode: string;
   bankName: string;
   accountNumber: string;
@@ -90,6 +105,11 @@ export type FindEmployeesFilters = {
   accountVerificationStatus?: AccountVerificationStatus;
   verificationJobStatus?: VerificationJobStatus;
   employeeListId?: string;
+  employeeTypeId?: string;
+  managerEmployeeId?: string;
+  groupId?: string;
+  employmentStartDate?: Date;
+  state?: string;
   paymentStatus?: EmployeePaymentStatus;
   status?: EmployeeStatus;
 };

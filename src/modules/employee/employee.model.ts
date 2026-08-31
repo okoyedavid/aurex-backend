@@ -21,6 +21,35 @@ const employeeSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    employeeTypeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "EmployeeType",
+      required: false,
+      index: true,
+    },
+    managerEmployeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+      index: true,
+    },
+    groupIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "EmployeeGroup",
+      },
+    ],
+    employmentStartDate: {
+      type: Date,
+      required: false,
+      index: true,
+    },
+    state: {
+      type: String,
+      trim: true,
+      required: false,
+      index: true,
+    },
     fullName: { type: String, trim: true, required: true },
     jobTitle: { type: String, trim: true, required: false },
     bankCode: { type: String, trim: true, required: true },
