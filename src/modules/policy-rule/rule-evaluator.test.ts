@@ -53,4 +53,27 @@ describe("policy rule evaluator", () => {
     const objectIdLike = { toString: () => "department-1" };
     expect(evaluate({ field: "department", operator: "equals", value: objectIdLike as never }).matched).toBe(true);
   });
+
+  it.each([
+    [{ field: "department", operator: "in", value: ["department-2", "department-1"] }, true],
+    [{ field: "department", operator: "not_in", value: ["department-2"] }, true],
+    [{ field: "state", operator: "not_equals", value: "NY" }, true],
+    [{ field: "group", operator: "not_contains", value: "group-3" }, true],
+    [{ field: "group", operator: "in", value: ["group-3", "group-1"] }, true],
+    [{ field: "tenure", operator: "lte", value: 24 }, true],
+    [{ field: "tenure", operator: "gt", value: 23 }, true],
+    [{ field: "tenure", operator: "lt", value: 24 }, false],
+  ] as const)("supports field-specific operator %o", (condition, matched) => {
+    expect(evaluate(condition).matched).toBe(matched);
+  });
+
+  it("rejects an operator that is invalid for a field", () => {
+    expect(
+      evaluate({
+        field: "state",
+        operator: "contains",
+        value: "C",
+      } as PolicyRuleCondition).matched,
+    ).toBe(false);
+  });
 });

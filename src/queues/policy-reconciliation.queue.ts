@@ -37,7 +37,7 @@ export const getPolicyQueue = () => {
   return queue;
 };
 
-const jobIdFor = (job: PolicyReconciliationJob) => {
+export const policyReconciliationJobId = (job: PolicyReconciliationJob) => {
   if (job.type === "RECONCILE_EMPLOYEE") {
     const requestVersion = job.requestedAt.replace(/[^0-9]/g, "");
     return `employee-${job.businessId}-${job.employeeId}-${requestVersion}`;
@@ -51,7 +51,7 @@ const jobIdFor = (job: PolicyReconciliationJob) => {
 export const enqueuePolicyReconciliation = async (job: PolicyReconciliationJob) => {
   const policyQueue = getPolicyQueue();
   if (!policyQueue) return null;
-  return policyQueue.add(job.type, job, { jobId: jobIdFor(job) });
+  return policyQueue.add(job.type, job, { jobId: policyReconciliationJobId(job) });
 };
 
 export const closePolicyQueue = async () => {
