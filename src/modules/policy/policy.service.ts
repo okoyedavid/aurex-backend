@@ -24,6 +24,30 @@ type Dependencies = {
 
 const id = (value: unknown) => String(value);
 const json = (document: { toObject: () => unknown }) => document.toObject();
+const comparable = (value: unknown): unknown => {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(comparable);
+  if (value && typeof value === "object") {
+    if ("toHexString" in value && typeof value.toHexString === "function") {
+      return value.toHexString();
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nested]) => [key, comparable(nested)]),
+    );
+  }
+  return value;
+};
+const hasMeaningfulChanges = (
+  existing: object,
+  updates: Record<string, unknown>,
+) => {
+  const current = existing as Record<string, unknown>;
+  return Object.entries(updates).some(
+    ([key, value]) =>
+      JSON.stringify(comparable(current[key])) !==
+      JSON.stringify(comparable(value)),
+  );
+};
 const assertEffectiveRange = (
   from: unknown,
   to: unknown,
@@ -73,13 +97,16 @@ export const createPolicyService = ({
     const result = await withTransaction(async (session) => {
       const existing = await repository.findCategory(businessId, categoryId, { session });
       if (!existing) throw createHttpError("Policy category not found", 404);
+      if (!hasMeaningfulChanges(existing, updates)) {
+        return { category: existing, changed: false };
+      }
       const category = await repository.updateCategory(businessId, categoryId, { $set: updates }, { session });
       if (!category) throw createHttpError("Policy category not found", 404);
       const action = updates.status === "archived" ? "CATEGORY_ARCHIVED" : "CATEGORY_UPDATED";
       await auditService.record({ ...auditActor, businessId, entityType: "policy_category", entityId: categoryId, categoryId, action, before: json(existing), after: json(category), changedFields: Object.keys(updates) }, session);
-      return { category };
+      return { category, changed: true };
     });
-    await enqueue({ type: "RECONCILE_CATEGORY", businessId, categoryId, reason: "policy.category.changed", requestedBy: userId, requestedAt: new Date().toISOString() });
+    if (result.changed) await enqueue({ type: "RECONCILE_CATEGORY", businessId, categoryId, reason: "policy.category.changed", requestedBy: userId, requestedAt: new Date().toISOString() });
     return result;
   };
 
@@ -128,12 +155,15 @@ export const createPolicyService = ({
           throw createHttpError("An active policy requires an active category", 400);
         }
       }
+      if (!hasMeaningfulChanges(existing, updates)) {
+        return { policy: existing, changed: false };
+      }
       const policy = await repository.updatePolicy(businessId, policyId, { $set: { ...updates, updatedBy: userId }, $inc: { version: 1 } }, { session });
       if (!policy) throw createHttpError("Policy not found", 404);
       await auditService.record({ ...auditActor, businessId, entityType: "policy", entityId: policyId, policyId, categoryId: id(policy.categoryId), action, before: json(existing), after: json(policy), changedFields: Object.keys(updates) }, session);
-      return { policy };
+      return { policy, changed: true };
     });
-    await enqueue({ type: "RECONCILE_POLICY", businessId, policyId, policyVersion: result.policy.version, reason: `policy.${action.toLowerCase()}`, requestedBy: userId, requestedAt: new Date().toISOString() });
+    if (result.changed) await enqueue({ type: "RECONCILE_POLICY", businessId, policyId, policyVersion: result.policy.version, reason: `policy.${action.toLowerCase()}`, requestedBy: userId, requestedAt: new Date().toISOString() });
     return result;
   };
 
@@ -205,6 +235,10 @@ export const createPolicyService = ({
         updates.effectiveTo === undefined ? existing.effectiveTo : updates.effectiveTo,
         createHttpError,
       );
+      if (!hasMeaningfulChanges(existing, updates)) {
+        const policy = await repository.findPolicy(businessId, id(existing.policyId), { session });
+        return { rule: existing, policyVersion: policy?.version ?? 1, changed: false };
+      }
       const normalizedUpdates = Array.isArray(updates.conditions)
         ? { ...updates, conditions: normalizeConditions(updates.conditions as PolicyRuleCondition[]) }
         : updates;
@@ -215,9 +249,9 @@ export const createPolicyService = ({
         ? "RULE_PRIORITY_CHANGED"
         : action;
       await auditService.record({ ...auditActor, businessId, entityType: "policy_rule", entityId: ruleId, policyRuleId: ruleId, policyId: id(rule.policyId), categoryId: policy ? id(policy.categoryId) : undefined, action: auditAction, before: json(existing), after: json(rule), changedFields: Object.keys(updates) }, session);
-      return { rule, policyVersion: policy?.version ?? 1 };
+      return { rule, policyVersion: policy?.version ?? 1, changed: true };
     });
-    await enqueue({ type: "RECONCILE_POLICY", businessId, policyId: id(result.rule.policyId), policyVersion: result.policyVersion, reason: `policy.rule.${action.toLowerCase()}`, requestedBy: userId, requestedAt: new Date().toISOString() });
+    if (result.changed) await enqueue({ type: "RECONCILE_POLICY", businessId, policyId: id(result.rule.policyId), policyVersion: result.policyVersion, reason: `policy.rule.${action.toLowerCase()}`, requestedBy: userId, requestedAt: new Date().toISOString() });
     return { rule: result.rule };
   };
 
