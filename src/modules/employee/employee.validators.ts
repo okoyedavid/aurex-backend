@@ -11,6 +11,10 @@ const employeeInputSchema = z
   .object({
     fullName: z.string().trim().min(2).max(50),
     jobTitle: z.string().trim().min(2).optional(),
+    employeeTypeId: objectIdSchema.nullable().optional(),
+    managerEmployeeId: objectIdSchema.nullable().optional(),
+    employmentStartDate: z.coerce.date().nullable().optional(),
+    state: z.string().trim().min(2).nullable().optional(),
 
     bankCode: z.string().trim().regex(/^\d{3,6}$/, {
       message: "Bank code must contain 3 to 6 digits",
@@ -64,8 +68,14 @@ const getEmployeeSchema = z.object({
 const updateEmployeeSchema = z.object({
   body: z
     .object({
+      employeeListId: objectIdSchema.optional(),
       fullName: z.string().trim().min(2).max(50).optional(),
       jobTitle: z.string().trim().min(2).nullable().optional(),
+      employeeTypeId: objectIdSchema.nullable().optional(),
+      managerEmployeeId: objectIdSchema.nullable().optional(),
+      groupIds: z.array(objectIdSchema).max(100).optional(),
+      employmentStartDate: z.coerce.date().nullable().optional(),
+      state: z.string().trim().min(2).nullable().optional(),
       bankCode: z.string().trim().regex(/^\d{3,6}$/).optional(),
       bankName: z.string().trim().min(2).optional(),
       accountNumber: z.string().trim().regex(/^\d{10}$/).optional(),

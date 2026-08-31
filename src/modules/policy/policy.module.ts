@@ -1,0 +1,20 @@
+import { createHttpError } from "../../utils/api-error.js";
+import { withTransaction } from "../../utils/mongooose-transactions.js";
+import { businessMemberRepository } from "../business-member/business-member.repository.js";
+import { employeeGroupRepository } from "../employee-group/employee-group.repository.js";
+import { employeeListRepository } from "../employee-list/employee-list.repository.js";
+import { employeeTypeRepository } from "../employee-type/employee-type.repository.js";
+import { employeeRepository } from "../employee/employee.repository.js";
+import { policyAuditRepository } from "../policy-audit/policy-audit.repository.js";
+import { createPolicyAuditService } from "../policy-audit/policy-audit.service.js";
+import { createPolicyController } from "./policy.controller.js";
+import { createPolicyReconciliationService } from "./policy-reconciliation.service.js";
+import { policyRepository } from "./policy.repository.js";
+import { createPolicyResolver } from "./policy-resolver.service.js";
+import { createPolicyService } from "./policy.service.js";
+
+export const policyAuditService = createPolicyAuditService(policyAuditRepository);
+export const policyResolver = createPolicyResolver({ employeeRepository, policyRepository, employeeListRepository, employeeTypeRepository, employeeGroupRepository, createHttpError });
+export const policyReconciliationService = createPolicyReconciliationService({ repository: policyRepository, employeeRepository, resolver: policyResolver, auditService: policyAuditService, withTransaction, createHttpError });
+export const policyService = createPolicyService({ repository: policyRepository, auditService: policyAuditService, businessMemberRepository, employeeListRepository, employeeTypeRepository, employeeGroupRepository, withTransaction, createHttpError });
+export const policyController = createPolicyController({ policyService, resolver: policyResolver, reconciliationService: policyReconciliationService, auditService: policyAuditService });

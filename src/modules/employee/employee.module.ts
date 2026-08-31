@@ -4,10 +4,14 @@ import { createEmployeeService } from "./employee.service.js";
 import { employeeListRepository } from "../employee-list/employee-list.repository.js";
 import { withTransaction } from "../../utils/mongooose-transactions.js";
 import { createHttpError } from "../../utils/api-error.js";
+import { employeeTypeRepository } from "../employee-type/employee-type.repository.js";
+import { employeeGroupRepository } from "../employee-group/employee-group.repository.js";
 
 const employeeService = createEmployeeService({
   employeeRepository,
   employeeListRepository,
+  employeeTypeRepository,
+  employeeGroupRepository,
   withTransaction,
   createHttpError,
 });

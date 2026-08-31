@@ -34,6 +34,13 @@ export const allowedPermissions = [
   "reports:view",
   "audit_logs:view",
   "employees:view_own",
+  "policies:view",
+  "policies:create",
+  "policies:update",
+  "policies:archive",
+  "policies:assign",
+  "policies:view_audit",
+  "policies:reconcile",
 ] as const;
 
 export type Permission = (typeof allowedPermissions)[number];

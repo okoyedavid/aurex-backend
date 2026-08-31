@@ -73,6 +73,26 @@ const findEmployeesByBusinessId = (
     query.status = filters.status;
   }
 
+  if (filters.employeeTypeId) {
+    query.employeeTypeId = filters.employeeTypeId;
+  }
+
+  if (filters.managerEmployeeId) {
+    query.managerEmployeeId = filters.managerEmployeeId;
+  }
+
+  if (filters.groupId) {
+    query.groupIds = filters.groupId;
+  }
+
+  if (filters.employmentStartDate) {
+    query.employmentStartDate = filters.employmentStartDate;
+  }
+
+  if (filters.state) {
+    query.state = filters.state;
+  }
+
   if (filters.accountVerificationStatus) {
     query.accountVerificationStatus = filters.accountVerificationStatus;
   }
@@ -95,6 +115,19 @@ const findEmployeesByEmployeeListId = (
     fullName: 1,
     createdAt: -1,
   });
+
+const findActiveEmployeesBatchByBusiness = (
+  businessId: string,
+  afterId: string | null,
+  limit: number,
+) =>
+  Employee.find({
+    businessId,
+    status: "active",
+    ...(afterId ? { _id: { $gt: afterId } } : {}),
+  })
+    .sort({ _id: 1 })
+    .limit(limit);
 
 const paginateEmployeesByList = async ({
   businessId,
@@ -228,6 +261,7 @@ export const employeeRepository = {
   findEmployeeByBusinessListAndId,
   findEmployeesByBusinessId,
   findEmployeesByEmployeeListId,
+  findActiveEmployeesBatchByBusiness,
   paginateEmployeesByList,
   updateEmployeeById,
   updateVerificationResult,

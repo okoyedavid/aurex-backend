@@ -135,6 +135,14 @@ const sensitiveActionLimiter = createLimiter({
   message: "Too many sensitive account actions. Try again later.",
 });
 
+const warpDemoLimiter = createLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: 150,
+  keyGenerator: (req: Request) =>
+    getRequestMetadata(req).ipAddress ?? "unknown-ip",
+  message: "Too many Warp demo requests. Try again later.",
+});
+
 export {
   emailDeliveryLimiter,
   globalLimiter,
@@ -143,4 +151,5 @@ export {
   otpLimiter,
   refreshLimiter,
   sensitiveActionLimiter,
+  warpDemoLimiter,
 };

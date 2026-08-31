@@ -21,6 +21,10 @@ export const CreateEmployeeController = ({
     const {
       fullName,
       jobTitle,
+      employeeTypeId,
+      managerEmployeeId,
+      employmentStartDate,
+      state,
       bankCode,
       bankName,
       accountNumber,
@@ -29,18 +33,25 @@ export const CreateEmployeeController = ({
       amount,
     } = body;
 
-    const { employee } = await employeeService.createEmployeeForList({
-      employeeListId,
-      businessId,
-      fullName,
-      jobTitle,
-      bankCode,
-      bankName,
-      accountNumber,
-      currency,
-      payFrequency,
-      amount,
-    });
+    const { employee } = await employeeService.createEmployeeForList(
+      {
+        employeeListId,
+        businessId,
+        fullName,
+        jobTitle,
+        employeeTypeId,
+        managerEmployeeId,
+        employmentStartDate,
+        state,
+        bankCode,
+        bankName,
+        accountNumber,
+        currency,
+        payFrequency,
+        amount,
+      },
+      req.user?.id,
+    );
 
     res.status(201).json({
       data: employee,
@@ -78,6 +89,7 @@ export const CreateEmployeeController = ({
     const { employee } = await employeeService.updateEmployee({
       ...params,
       updates,
+      requestedBy: req.user?.id,
     });
 
     return res.status(200).json({
