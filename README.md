@@ -1110,8 +1110,7 @@ Potential extensions, not requirements for the current release:
 
 - Durable invitation email worker and resend/revoke routes.
 - Token-based invite landing/acceptance endpoints.
-- A centralized policy engine for role assignment, employee linking, approval, and
-  other delegated authority decisions.
+- Policy assignment configuration UI and production Redis provisioning.
 - Audited direct and bulk member-to-employee linking endpoints. Until these exist,
   existing members use the `EMPLOYEE` invitation workflow.
 - Ownership transfer and voluntary leave-business workflows.
@@ -1138,3 +1137,34 @@ business-navigation.prompt.md
 The backend returns permissions and data, not frontend navigation definitions or icon
 names. Frontend route guards improve user experience, while backend middleware remains
 the authorization boundary.
+
+## Employee Policy Assignment
+
+Policies are business-owned and organized under categories with `ONE` or `MANY`
+cardinality. Rules use AND semantics over department (`employeeListId`), employee type,
+groups, state, and tenure. Tenure is calculated in completed months at evaluation time;
+it is never incremented or persisted on an employee.
+
+Effective intervals are half-open: `effectiveFrom <= asOf < effectiveTo`. Automatic
+candidates are deduplicated by policy, then ordered by rule priority descending,
+policy ObjectId lexically ascending, and winning rule ObjectId lexically ascending.
+Manual assignments take explicit precedence in `ONE` categories and are never modeled
+as an artificial high priority.
+
+`EmployeePolicyAssignment` retains active and ended assignment intervals. Immutable
+`PolicyAudit` rows record policy-domain mutations and assignment reconciliation with
+actor and correlation metadata. Historical assignment queries are reliable; historical
+rule explanations are limited by the employee attributes captured in policy audit at
+the time of assignment because the employee collection itself is not event-sourced.
+
+Policy reconciliation is event-driven through BullMQ when Redis is configured.
+Employee policy-dimension changes enqueue employee jobs, policy/rule/category changes
+enqueue broader jobs, and a nightly scheduler at 02:00 server time provides repair-only
+coverage. Business and employee enumeration is cursor-batched. Queue jobs resolve from
+current authoritative state, so a stale policy-version job observes the newer version
+and still reconciles current state.
+
+After adding policy permissions, rerun `npm run seed:roles` so persisted system roles
+receive the new owner permission set. Existing assignment documents created before this
+feature require a backfill for `categoryId`, `winningRuleId`, and `matchedRuleIds` before
+the new required assignment schema is enforced in production.
