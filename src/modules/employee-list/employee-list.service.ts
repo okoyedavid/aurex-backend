@@ -8,6 +8,7 @@ import type { EmployeeService } from "../employee/employee.service.js";
 import type { WithTransaction } from "../../utils/mongooose-transactions.js";
 import type { RepositoryOptions } from "../../types/repository-types.js";
 import type { HttpError } from "../../utils/api-error.js";
+import { enqueuePolicyReconciliation } from "../../queues/policy-reconciliation.queue.js";
 
 type CreateEmployeeListServiceDependencies = {
   employeeListRepository: EmployeeListRepository;
@@ -47,8 +48,9 @@ const createEmployeeListService = ({
 
     // Sequential writes are intentional: MongoDB does not support parallel
     // operations safely inside one transaction/session.
+    const createdEmployees = [];
     for (const employeeInput of employees) {
-      await employeeService.createEmployee(
+      const result = await employeeService.createEmployee(
         {
           ...employeeInput,
           businessId: listInput.businessId,
@@ -56,9 +58,10 @@ const createEmployeeListService = ({
         },
         options,
       );
+      createdEmployees.push(result.employee);
     }
 
-    return { employeeList };
+    return { employeeList, createdEmployees };
   };
 
   const createEmployeeListForBusiness = async (
@@ -66,7 +69,28 @@ const createEmployeeListService = ({
       businessId: string;
       createdByUserId: string;
     },
-  ) => withTransaction((session) => createEmployeeList(payload, { session }));
+  ) => {
+    const result = await withTransaction((session) =>
+      createEmployeeList(payload, { session }),
+    );
+    for (const employee of result.createdEmployees) {
+      await enqueuePolicyReconciliation({
+        type: "RECONCILE_EMPLOYEE",
+        businessId: payload.businessId,
+        employeeId: employee.id,
+        reason: "employee.created_in_list",
+        requestedBy: payload.createdByUserId,
+        requestedAt: new Date().toISOString(),
+      }).catch((error) =>
+        console.error("Failed to enqueue employee policy reconciliation", {
+          businessId: payload.businessId,
+          employeeId: employee.id,
+          error,
+        }),
+      );
+    }
+    return result;
+  };
 
   const getVerificationStatus = async ({
     businessId,

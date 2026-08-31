@@ -48,6 +48,10 @@ const envSchema = z.object({
   PAYSTACK_TEST_BANK_CODE: z.string().regex(/^\d{3,6}$/).default("001"),
   VERIFICATION_WORKER_INTERVAL_MS: z.coerce.number().int().min(500).default(1000),
   VERIFICATION_MAX_ATTEMPTS: z.coerce.number().int().min(1).default(5),
+  REDIS_URL: z.string().url().optional(),
+  POLICY_RECONCILIATION_CONCURRENCY: z.coerce.number().int().min(1).max(50).default(3),
+  POLICY_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(10).max(1000).default(100),
+  POLICY_RECONCILIATION_NIGHTLY_CRON: z.string().min(1).default("0 2 * * *"),
 });
 
 export const env = envSchema.parse(process.env);
