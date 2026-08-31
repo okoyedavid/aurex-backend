@@ -27,6 +27,7 @@ import {
 import { notificationRouter } from "./modules/notification/notification.route.js";
 import { roleRouter } from "./modules/role/role.route.js";
 import { policyRouter } from "./modules/policy/policy.route.js";
+import { warpDemoRouter } from "./modules/warp-demo/warp-demo.route.js";
 
 const app = express();
 
@@ -58,6 +59,7 @@ app.get("/", (_req, res) => {
 });
 
 app.use("/api/health", healthRouter);
+app.use("/api/demo/warp", warpDemoRouter);
 app.use("/status", statusRouter);
 app.use("/api/auth", authRouter);
 app.use("/api", sessionRouter);

@@ -5,6 +5,7 @@ export default defineConfig({
     include: [
       "src/modules/policy-rule/**/*.test.ts",
       "src/modules/policy/**/*.test.ts",
+      "src/modules/warp-demo/**/*.test.ts",
       "src/queues/**/*.test.ts",
     ],
     exclude: ["**/*.route.test.ts"],

@@ -9,6 +9,7 @@
     "render-build": "npm ci --include=dev && npm run download:maxmind && npm run build",
     "build": "tsc",
     "seed:roles": "tsx scripts/seed-system-roles.ts",
+    "seed:warp-demo": "tsx scripts/seed-warp-demo.ts",
     "start": "node dist/server.js",
     "test": "cross-env NODE_ENV=test vitest",
     "test:unit": "cross-env NODE_ENV=test vitest --config vitest.unit.config.ts",
