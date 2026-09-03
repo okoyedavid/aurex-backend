@@ -4,6 +4,8 @@ import { app } from "../../app.js";
 import { BusinessMember } from "../business-member/business-member.model.js";
 import { EmployeeList } from "../employee-list/employee-list.model.js";
 import { Employee } from "../employee/employee.model.js";
+import { EmployeeType } from "../employee-type/employee-type.model.js";
+import { EmployeeGroup } from "../employee-group/employee-group.model.js";
 import { Role } from "../role/role.model.js";
 import { User } from "../users/user.models.js";
 import { Business } from "./business.model.js";
@@ -59,6 +61,8 @@ describe("business employee creation routes", () => {
 
     await Promise.all([
       Employee.deleteMany({ businessId: { $in: businessIds } }),
+      EmployeeType.deleteMany({ businessId: { $in: businessIds } }),
+      EmployeeGroup.deleteMany({ businessId: { $in: businessIds } }),
       EmployeeList.deleteMany({ businessId: { $in: businessIds } }),
       BusinessMember.deleteMany({ businessId: { $in: businessIds } }),
       Role.deleteMany({ businessId: { $in: businessIds } }),
@@ -227,6 +231,164 @@ describe("business employee creation routes", () => {
     expect(statusResponse.status).toBe(200);
     expect(statusResponse.body.data.totalEmployeeCount).toBe(1);
     expect(statusResponse.body.data.pendingVerificationCount).toBe(1);
+  });
+
+  it("resolves business-owned employee defaults and assigns them to employees", async () => {
+    const systemTypesResponse = await agent.get(
+      `/api/businesses/${baseBusinessId}/employee-types/system`,
+    );
+    expect(systemTypesResponse.status).toBe(200);
+    expect(systemTypesResponse.body.data.items).toContainEqual({
+      key: "full_time",
+      name: "Full Time",
+    });
+
+    const systemGroupsResponse = await agent.get(
+      `/api/businesses/${baseBusinessId}/employee-groups/system`,
+    );
+    expect(systemGroupsResponse.status).toBe(200);
+    expect(systemGroupsResponse.body.data.items).toContainEqual({
+      key: "engineering",
+      name: "Engineering",
+    });
+
+    const typeResponse = await agent
+      .post(`/api/businesses/${baseBusinessId}/employee-types`)
+      .send({ templateKey: "full_time" });
+    expect(typeResponse.status).toBe(201);
+    expect(typeResponse.body.meta.created).toBe(true);
+    expect(typeResponse.body.data).toMatchObject({
+      businessId: baseBusinessId,
+      name: "Full Time",
+      sourceTemplateKey: "full_time",
+      status: "active",
+    });
+    const employeeTypeId = typeResponse.body.data.id as string;
+
+    const repeatedTypeResponse = await agent
+      .post(`/api/businesses/${baseBusinessId}/employee-types`)
+      .send({ templateKey: "full_time" });
+    expect(repeatedTypeResponse.status).toBe(200);
+    expect(repeatedTypeResponse.body.meta.created).toBe(false);
+    expect(repeatedTypeResponse.body.data.id).toBe(employeeTypeId);
+
+    const groupResponse = await agent
+      .post(`/api/businesses/${baseBusinessId}/employee-groups`)
+      .send({ templateKey: "engineering" });
+    expect(groupResponse.status).toBe(201);
+    const employeeGroupId = groupResponse.body.data.id as string;
+
+    const customGroupResponse = await agent
+      .post(`/api/businesses/${baseBusinessId}/employee-groups`)
+      .send({
+        name: "Platform Team",
+        description: "Platform engineering employees",
+      });
+    expect(customGroupResponse.status).toBe(201);
+
+    const updateTypeResponse = await agent
+      .patch(
+        `/api/businesses/${baseBusinessId}/employee-types/${employeeTypeId}`,
+      )
+      .send({ description: "Permanent salaried employees" });
+    expect(updateTypeResponse.status).toBe(200);
+    expect(updateTypeResponse.body.data.description).toBe(
+      "Permanent salaried employees",
+    );
+
+    const updateGroupResponse = await agent
+      .patch(
+        `/api/businesses/${baseBusinessId}/employee-groups/${employeeGroupId}`,
+      )
+      .send({ description: "Core engineering group" });
+    expect(updateGroupResponse.status).toBe(200);
+
+    const listTypesResponse = await agent.get(
+      `/api/businesses/${baseBusinessId}/employee-types?page=1&limit=20`,
+    );
+    expect(listTypesResponse.status).toBe(200);
+    expect(listTypesResponse.body.data.items).toHaveLength(1);
+
+    const listGroupsResponse = await agent.get(
+      `/api/businesses/${baseBusinessId}/employee-groups?page=1&limit=20`,
+    );
+    expect(listGroupsResponse.status).toBe(200);
+    expect(listGroupsResponse.body.data.items).toHaveLength(2);
+
+    const listResponse = await agent
+      .post(`/api/businesses/${baseBusinessId}/employee-lists`)
+      .send({
+        name: `Policy Payroll ${Date.now()}`,
+        currency: "NGN",
+        payFrequency: "monthly",
+      });
+    expect(listResponse.status).toBe(201);
+    const employeeListId = listResponse.body.data.id as string;
+
+    const rejectedCreateResponse = await agent
+      .post(
+        `/api/businesses/${baseBusinessId}/employee-lists/${employeeListId}/employees`,
+      )
+      .send({
+        ...employeePayload("Policy Employee", "5801017094"),
+        employeeTypeId,
+        groupIds: [employeeGroupId],
+        employmentStartDate: "2026-08-31",
+        state: "Lagos",
+      });
+    expect(rejectedCreateResponse.status).toBe(400);
+
+    const createEmployeeResponse = await agent
+      .post(
+        `/api/businesses/${baseBusinessId}/employee-lists/${employeeListId}/employees`,
+      )
+      .send({
+        ...employeePayload("Policy Employee", "5801017094"),
+        employeeTypeId,
+        employmentStartDate: "2026-08-31",
+        state: "Lagos",
+      });
+    expect(createEmployeeResponse.status).toBe(201);
+    expect(createEmployeeResponse.body.data).toMatchObject({
+      employeeTypeId,
+      state: "Lagos",
+      groupIds: [],
+    });
+    const employeeId = createEmployeeResponse.body.data.id as string;
+
+    const assignGroupResponse = await agent
+      .patch(
+        `/api/businesses/${baseBusinessId}/employee-lists/${employeeListId}/employees/${employeeId}`,
+      )
+      .send({ groupIds: [employeeGroupId, employeeGroupId] });
+    expect(assignGroupResponse.status).toBe(200);
+    expect(assignGroupResponse.body.data.groupIds).toEqual([employeeGroupId]);
+
+    const directReportResponse = await agent
+      .post(
+        `/api/businesses/${baseBusinessId}/employee-lists/${employeeListId}/employees`,
+      )
+      .send({
+        ...employeePayload("Policy Direct Report", "5801017095"),
+        managerEmployeeId: employeeId,
+      });
+    expect(directReportResponse.status).toBe(201);
+    expect(directReportResponse.body.data.managerEmployeeId).toBe(employeeId);
+    const directReportId = directReportResponse.body.data.id as string;
+
+    const selfManagerResponse = await agent
+      .patch(
+        `/api/businesses/${baseBusinessId}/employee-lists/${employeeListId}/employees/${employeeId}`,
+      )
+      .send({ managerEmployeeId: employeeId });
+    expect(selfManagerResponse.status).toBe(400);
+
+    const cyclicManagerResponse = await agent
+      .patch(
+        `/api/businesses/${baseBusinessId}/employee-lists/${employeeListId}/employees/${employeeId}`,
+      )
+      .send({ managerEmployeeId: directReportId });
+    expect(cyclicManagerResponse.status).toBe(400);
   });
 
   it("lists and retrieves business members with populated details", async () => {

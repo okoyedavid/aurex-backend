@@ -6,17 +6,28 @@ import type { HttpError } from "../../utils/api-error.js";
 import type { ClientSession } from "mongoose";
 import type { EmployeeTypeRepository } from "../employee-type/employee-type.repository.js";
 import type { EmployeeGroupRepository } from "../employee-group/employee-group.repository.js";
+import type { AuditEventService } from "../audit-event/audit-event.service.js";
+import type { BusinessMemberRepository } from "../business-member/business-member.repository.js";
 import {
+  BusinessEmployeeListFilters,
   CreateEmployeePayload,
   UpdateEmployeeInput,
 } from "./employee.types.js";
 import { enqueuePolicyReconciliation } from "../../queues/policy-reconciliation.queue.js";
+import {
+  mapEmployeeDetail,
+  mapEmployeeSummary,
+  type EmployeeRelations,
+  type EmployeeSource,
+} from "./employee.dto.js";
 
 type CreateEmployeeServiceDependencies = {
   employeeRepository: EmployeeRepository;
   employeeListRepository: EmployeeListRepository;
   employeeTypeRepository: EmployeeTypeRepository;
   employeeGroupRepository: EmployeeGroupRepository;
+  auditEventService: AuditEventService;
+  businessMemberRepository: BusinessMemberRepository;
   withTransaction: WithTransaction;
   createHttpError: (message: string, statusCode: number) => HttpError;
 };
@@ -26,9 +37,69 @@ const createEmployeeService = ({
   employeeListRepository,
   employeeTypeRepository,
   employeeGroupRepository,
+  auditEventService,
+  businessMemberRepository,
   withTransaction,
   createHttpError,
 }: CreateEmployeeServiceDependencies) => {
+  const value = (input: unknown): unknown => {
+    if (input instanceof Date) return input.toISOString();
+    if (Array.isArray(input)) return input.map((item) => String(item)).sort();
+    if (input && typeof input === "object") return String(input);
+    return input;
+  };
+  const object = (input: unknown): Record<string, unknown> => {
+    if (!input || typeof input !== "object") return {};
+    if ("toObject" in input && typeof input.toObject === "function") {
+      return input.toObject() as Record<string, unknown>;
+    }
+    return input as Record<string, unknown>;
+  };
+  const changedFields = (existing: Record<string, unknown>, updates: Record<string, unknown>) =>
+    Object.keys(updates).filter((field) => JSON.stringify(value(existing[field])) !== JSON.stringify(value(updates[field])));
+  const safeEmployeeAuditFields = new Set([
+    "fullName", "jobTitle", "employeeListId", "employeeTypeId", "managerEmployeeId",
+    "groupIds", "employmentStartDate", "state", "status", "payFrequency", "currency",
+  ]);
+  const recordEmployeeAudit = async ({
+    businessId,
+    employeeId,
+    requestedBy,
+    action,
+    fields,
+    before,
+    after,
+  }: {
+    businessId: string;
+    employeeId: string;
+    requestedBy?: string;
+    action: "business.employee.created" | "business.employee.updated";
+    fields: string[];
+    before: Record<string, unknown>;
+    after: Record<string, unknown>;
+  }) => {
+    const actor = requestedBy
+      ? await businessMemberRepository.findActiveMembershipByBusinessAndUser(businessId, requestedBy).catch(() => null)
+      : null;
+    const safeFields = fields.filter((field) => safeEmployeeAuditFields.has(field));
+    await auditEventService.recordEventSafely({
+      eventType: action,
+      category: "business",
+      outcome: "success",
+      businessId,
+      actorBusinessMemberId: actor ? String(actor.id) : null,
+      employeeId,
+      subjectType: "employee",
+      subjectId: employeeId,
+      userId: requestedBy ?? null,
+      email: null,
+      changes: safeFields.length ? {
+        fields: safeFields,
+        before: Object.fromEntries(safeFields.map((field) => [field, value(before[field])])),
+        after: Object.fromEntries(safeFields.map((field) => [field, value(after[field])])),
+      } : undefined,
+    });
+  };
   const requireActiveEmployeeType = async (
     businessId: string,
     employeeTypeId: string,
@@ -185,6 +256,15 @@ const createEmployeeService = ({
     const result = await withTransaction((session) =>
       createEmployeeForListInSession(payload, session),
     );
+    await recordEmployeeAudit({
+      businessId: payload.businessId,
+      employeeId: result.employee.id,
+      requestedBy,
+      action: "business.employee.created",
+      fields: ["fullName", "jobTitle", "employeeListId", "employeeTypeId", "managerEmployeeId", "employmentStartDate", "state"],
+      before: {},
+      after: result.employee.toObject(),
+    });
     try {
       await enqueuePolicyReconciliation({
         type: "RECONCILE_EMPLOYEE",
@@ -219,6 +299,119 @@ const createEmployeeService = ({
     }
 
     return employeeList;
+  };
+
+  const requireEmployeeForBusiness = async (
+    businessId: string,
+    employeeId: string,
+  ) => {
+    const employee = await employeeRepository.findByIdAndBusiness(
+      employeeId,
+      businessId,
+    );
+    if (!employee) {
+      throw createHttpError("Employee not found in this business", 404);
+    }
+    return employee;
+  };
+
+  const loadRelations = async (
+    businessId: string,
+    employees: EmployeeSource[],
+  ): Promise<EmployeeRelations> => {
+    const departmentIds = [
+      ...new Set(employees.map((employee) => String(employee.employeeListId))),
+    ];
+    const employeeTypeIds = [
+      ...new Set(
+        employees.flatMap((employee) =>
+          employee.employeeTypeId ? [String(employee.employeeTypeId)] : [],
+        ),
+      ),
+    ];
+    const groupIds = [
+      ...new Set(
+        employees.flatMap((employee) =>
+          (employee.groupIds ?? []).map((groupId) => String(groupId)),
+        ),
+      ),
+    ];
+    const managerIds = [
+      ...new Set(
+        employees.flatMap((employee) =>
+          employee.managerEmployeeId
+            ? [String(employee.managerEmployeeId)]
+            : [],
+        ),
+      ),
+    ];
+
+    const [departments, employeeTypes, groups, managers] = await Promise.all([
+      employeeListRepository.findEmployeeListsByBusinessAndIds(
+        businessId,
+        departmentIds,
+      ),
+      employeeTypeRepository.findByBusinessAndIds(
+        businessId,
+        employeeTypeIds,
+      ),
+      employeeGroupRepository.findByBusinessAndIds(businessId, groupIds),
+      employeeRepository.findByIdsAndBusiness(businessId, managerIds),
+    ]);
+
+    return {
+      departments: new Map(departments.map((item) => [item.id, item])),
+      employeeTypes: new Map(employeeTypes.map((item) => [item.id, item])),
+      groups: new Map(groups.map((item) => [item.id, item])),
+      managers: new Map(managers.map((item) => [item.id, item])),
+    };
+  };
+
+  const listBusinessEmployees = async ({
+    businessId,
+    page,
+    limit,
+    ...filters
+  }: BusinessEmployeeListFilters & {
+    businessId: string;
+    page: number;
+    limit: number;
+  }) => {
+    const { items, total } =
+      await employeeRepository.paginateEmployeesByBusiness({
+        businessId,
+        page,
+        limit,
+        filters,
+      });
+    const relations = await loadRelations(businessId, items);
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      items: items.map((employee) =>
+        mapEmployeeSummary(employee, relations),
+      ),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    };
+  };
+
+  const getEmployeeProfile = async ({
+    businessId,
+    employeeId,
+  }: {
+    businessId: string;
+    employeeId: string;
+  }) => {
+    const employee = await requireEmployeeForBusiness(businessId, employeeId);
+    const relations = await loadRelations(businessId, [employee]);
+    return { employee: mapEmployeeDetail(employee, relations) };
   };
 
   const listEmployees = async ({
@@ -260,39 +453,33 @@ const createEmployeeService = ({
     employeeListId: string;
     employeeId: string;
   }) => {
-    const employee = await employeeRepository.findEmployeeByBusinessListAndId(
-      businessId,
-      employeeListId,
-      employeeId,
-    );
-
-    if (!employee) {
+    const employee = await requireEmployeeForBusiness(businessId, employeeId);
+    if (String(employee.employeeListId) !== employeeListId) {
       throw createHttpError("Employee not found in this employee list", 404);
     }
 
     return { employee };
   };
 
-  const updateEmployee = async ({
+  const updateEmployeeForBusinessInternal = async ({
     businessId,
-    employeeListId,
     employeeId,
     updates,
     requestedBy,
+    expectedEmployeeListId,
   }: {
     businessId: string;
-    employeeListId: string;
     employeeId: string;
     updates: UpdateEmployeeInput;
     requestedBy?: string;
+    expectedEmployeeListId?: string;
   }) => {
-    const existing = await employeeRepository.findEmployeeByBusinessListAndId(
-      businessId,
-      employeeListId,
-      employeeId,
-    );
-
-    if (!existing) {
+    const existing = await requireEmployeeForBusiness(businessId, employeeId);
+    const currentEmployeeListId = String(existing.employeeListId);
+    if (
+      expectedEmployeeListId &&
+      currentEmployeeListId !== expectedEmployeeListId
+    ) {
       throw createHttpError("Employee not found in this employee list", 404);
     }
 
@@ -306,7 +493,10 @@ const createEmployeeService = ({
       await requireActiveEmployeeType(businessId, updates.employeeTypeId);
     }
 
-    if (updates.employeeListId && updates.employeeListId !== employeeListId) {
+    if (
+      updates.employeeListId &&
+      updates.employeeListId !== currentEmployeeListId
+    ) {
       await requireEmployeeList(businessId, updates.employeeListId);
     }
 
@@ -330,24 +520,35 @@ const createEmployeeService = ({
         : {}),
     };
 
+    const meaningfulFields = changedFields(
+      object(existing),
+      normalizedUpdates as Record<string, unknown>,
+    );
+    if (meaningfulFields.length === 0) return { employee: existing };
+
     const employee = bankDetailsChanged
-      ? await employeeRepository.updateVerificationResult(employeeId, {
-          $set: {
-            ...normalizedUpdates,
-            accountVerificationStatus: "stale",
-            verificationJobStatus: "pending",
-            verificationAttemptCount: 0,
-            paymentStatus: "blocked",
+      ? await employeeRepository.updateVerificationResultByBusiness(
+          businessId,
+          employeeId,
+          {
+            $set: {
+              ...normalizedUpdates,
+              accountVerificationStatus: "stale",
+              verificationJobStatus: "pending",
+              verificationAttemptCount: 0,
+              paymentStatus: "blocked",
+            },
+            $unset: {
+              accountName: 1,
+              accountVerifiedAt: 1,
+              accountVerificationFailureReason: 1,
+              lastAccountValidationAt: 1,
+              nextVerificationAttemptAt: 1,
+            },
           },
-          $unset: {
-            accountName: 1,
-            accountVerifiedAt: 1,
-            accountVerificationFailureReason: 1,
-            lastAccountValidationAt: 1,
-            nextVerificationAttemptAt: 1,
-          },
-        })
-      : await employeeRepository.updateEmployeeById(
+        )
+      : await employeeRepository.updateEmployeeByBusinessAndId(
+          businessId,
           employeeId,
           normalizedUpdates,
         );
@@ -373,11 +574,14 @@ const createEmployeeService = ({
     };
 
     if (bankDetailsChanged) {
-      await refreshEmployeeList(employeeListId);
+      await refreshEmployeeList(currentEmployeeListId);
     }
 
-    if (updates.employeeListId && updates.employeeListId !== employeeListId) {
-      await refreshEmployeeList(employeeListId);
+    if (
+      updates.employeeListId &&
+      updates.employeeListId !== currentEmployeeListId
+    ) {
+      await refreshEmployeeList(currentEmployeeListId);
       await refreshEmployeeList(updates.employeeListId);
     }
 
@@ -408,7 +612,58 @@ const createEmployeeService = ({
       }
     }
 
+    await recordEmployeeAudit({
+      businessId,
+      employeeId,
+      requestedBy,
+      action: "business.employee.updated",
+      fields: meaningfulFields,
+      before: object(existing),
+      after: object(employee),
+    });
+
     return { employee };
+  };
+
+  const updateEmployee = async ({
+    businessId,
+    employeeListId,
+    employeeId,
+    updates,
+    requestedBy,
+  }: {
+    businessId: string;
+    employeeListId: string;
+    employeeId: string;
+    updates: UpdateEmployeeInput;
+    requestedBy?: string;
+  }) =>
+    updateEmployeeForBusinessInternal({
+      businessId,
+      employeeId,
+      updates,
+      requestedBy,
+      expectedEmployeeListId: employeeListId,
+    });
+
+  const updateBusinessEmployee = async ({
+    businessId,
+    employeeId,
+    updates,
+    requestedBy,
+  }: {
+    businessId: string;
+    employeeId: string;
+    updates: UpdateEmployeeInput;
+    requestedBy?: string;
+  }) => {
+    await updateEmployeeForBusinessInternal({
+      businessId,
+      employeeId,
+      updates,
+      requestedBy,
+    });
+    return getEmployeeProfile({ businessId, employeeId });
   };
 
   return {
@@ -416,7 +671,10 @@ const createEmployeeService = ({
     createEmployeeForList,
     createEmployeeForListInSession,
     getEmployee,
+    getEmployeeProfile,
+    listBusinessEmployees,
     listEmployees,
+    updateBusinessEmployee,
     updateEmployee,
   };
 };

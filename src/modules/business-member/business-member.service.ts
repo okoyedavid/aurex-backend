@@ -167,7 +167,12 @@ export const createBusinessMemberService = ({
       );
     }
 
-    return { actorPermissions, targetMember, targetUserId };
+    return {
+      actorMemberId: getDocumentId(actorMembership),
+      actorPermissions,
+      targetMember,
+      targetUserId,
+    };
   };
 
   const recordMemberEvent = async ({
@@ -179,6 +184,7 @@ export const createBusinessMemberService = ({
     targetEmail,
     roleId,
     status,
+    changes,
     title,
     message,
   }: {
@@ -193,34 +199,34 @@ export const createBusinessMemberService = ({
     targetEmail: string | null;
     roleId?: string;
     status?: string;
+    changes?: { fields: string[]; before: Record<string, unknown>; after: Record<string, unknown> };
     title: string;
     message: string;
   }) => {
-    const metadata = { businessId, memberId, roleId, status };
-
-    await Promise.all([
-      auditEventService.recordEventSafely({
-        eventType,
-        category: "business",
-        outcome: "success",
-        userId: actorUserId,
-        email: null,
-        metadata,
-      }),
-      auditEventService.recordEventSafely({
-        eventType,
-        category: "business",
-        outcome: "success",
-        userId: targetUserId,
-        email: targetEmail,
-        metadata,
-        notification: {
-          title,
-          message,
-          severity: status === "removed" ? "warning" : "info",
-        },
-      }),
-    ]);
+    const actorMembership =
+      await businessMemberRepository.findActiveMembershipByBusinessAndUser(
+        businessId,
+        actorUserId,
+      ).catch(() => null);
+    await auditEventService.recordEventSafely({
+      eventType,
+      category: "business",
+      outcome: "success",
+      businessId,
+      actorBusinessMemberId: actorMembership ? getDocumentId(actorMembership) : null,
+      subjectBusinessMemberId: memberId,
+      subjectType: "member",
+      subjectId: memberId,
+      userId: targetUserId,
+      email: targetEmail,
+      changes,
+      metadata: { roleId, status },
+      notification: {
+        title,
+        message,
+        severity: status === "removed" ? "warning" : "info",
+      },
+    });
   };
 
   const updateBusinessMemberRole = async ({
@@ -290,6 +296,11 @@ export const createBusinessMemberService = ({
       roleId,
       title: "Business role updated",
       message: `Your business role was changed to ${role.name}.`,
+      changes: {
+        fields: ["role"],
+        before: { role: (targetMember.roleId as unknown as PopulatedRole).name ?? "Previous role" },
+        after: { role: role.name ?? role.key },
+      },
     });
 
     return { businessMember };
@@ -339,6 +350,11 @@ export const createBusinessMemberService = ({
       status,
       title: "Business membership status updated",
       message: `Your business membership is now ${status}.`,
+      changes: {
+        fields: ["status"],
+        before: { status: targetMember.status },
+        after: { status },
+      },
     });
 
     return { businessMember };
@@ -379,6 +395,11 @@ export const createBusinessMemberService = ({
       status: "removed",
       title: "Removed from business",
       message: "Your business membership was removed.",
+      changes: {
+        fields: ["status"],
+        before: { status: targetMember.status },
+        after: { status: "removed" },
+      },
     });
 
     return { businessMember };

@@ -46,6 +46,7 @@ describe("business invitation routes", () => {
   let existingMemberEmployeeUserId: string;
   let viewerRoleId: string;
   let employeeListId: string;
+  let employeeListName: string;
 
   const registerAndLogin = async (
     agent: ReturnType<typeof request.agent>,
@@ -178,9 +179,10 @@ describe("business invitation routes", () => {
     expect(response.status).toBe(201);
     businessId = response.body.data.id;
 
+    employeeListName = `Invite Employees ${Date.now()}`;
     const employeeList = await EmployeeList.create({
       businessId,
-      name: `Invite Employees ${Date.now()}`,
+      name: employeeListName,
       currency: "NGN",
       defaultPayFrequency: "monthly",
       createdByUserId: ownerUserId,
@@ -494,7 +496,16 @@ describe("business invitation routes", () => {
       `/api/businesses/${businessId}/invites/pending-approval`,
     );
     expect(pendingResponse.status).toBe(200);
-    expect(pendingResponse.body.data.items[0].id).toBe(inviteId);
+    const pendingInvite = pendingResponse.body.data.items.find(
+      (item: { id: string }) => item.id === inviteId,
+    );
+    expect(pendingInvite).toBeDefined();
+    expect(pendingInvite.membershipContext).toEqual({
+      membershipId: null,
+      status: "none",
+      currentRole: null,
+      roleOutcome: "apply_requested",
+    });
 
     const forbiddenApproval = await delegatedAgent.post(
       `/api/businesses/${businessId}/invites/${inviteId}/approve`,
@@ -673,6 +684,21 @@ describe("business invitation routes", () => {
     expect(pendingInvite.employeeId).toMatchObject({
       id: employee._id.toString(),
       fullName: "Delegated Existing Employee",
+      employeeListId: {
+        id: employeeListId,
+        name: employeeListName,
+      },
+    });
+
+    const sentResponse = await ownerAgent.get(
+      `/api/businesses/${businessId}/invites?status=accepted`,
+    );
+    const sentInvite = sentResponse.body.data.items.find(
+      (item: { id: string }) => item.id === inviteId,
+    );
+    expect(sentInvite.employeeId.employeeListId).toEqual({
+      id: employeeListId,
+      name: employeeListName,
     });
 
     const approvalResponse = await ownerAgent.post(
@@ -704,6 +730,41 @@ describe("business invitation routes", () => {
     );
     expect(acceptResponse.status).toBe(200);
     expect(acceptResponse.body.data.approvalStatus).toBe("pending");
+
+    const delegatedMembership = await BusinessMember.findOne({
+      businessId,
+      userId: delegatedUserId,
+    });
+    const delegatedRole = await Role.findById(delegatedMembership?.roleId);
+    expect(delegatedRole).not.toBeNull();
+    const originalPermissions = [...delegatedRole!.permissions];
+    delegatedRole!.permissions = [
+      ...systemRolePermissions.viewer,
+      "members:invite",
+      "roles:assign",
+      "employees:create",
+    ];
+    await delegatedRole!.save();
+
+    const missingListVisibilityResponse = await delegatedAgent
+      .post(`/api/businesses/${businessId}/invites/${inviteId}/approve`)
+      .send({
+        employee: {
+          employeeListId,
+          fullName: "Delegated Created Employee",
+          bankCode: "058",
+          bankName: "Test Bank",
+          accountNumber: "1000000004",
+          amount: 80_000,
+        },
+      });
+    expect(missingListVisibilityResponse.status).toBe(403);
+    expect(missingListVisibilityResponse.body.message).toBe(
+      "You need employee_lists:view to select the employee list",
+    );
+
+    delegatedRole!.permissions = originalPermissions;
+    await delegatedRole!.save();
 
     const approvalResponse = await ownerAgent
       .post(`/api/businesses/${businessId}/invites/${inviteId}/approve`)
@@ -739,6 +800,45 @@ describe("business invitation routes", () => {
       roleId: viewerRoleId,
       invitedByUserId: ownerUserId,
     });
+
+    const approvalInviteResponse = await delegatedAgent
+      .post(`/api/businesses/${businessId}/invites`)
+      .send({
+        email: existingMemberEmployeeEmail,
+        roleId: viewerRoleId,
+        type: "EMPLOYEE",
+      });
+    expect(approvalInviteResponse.status).toBe(201);
+    const approvalInviteId = approvalInviteResponse.body.data.id as string;
+
+    const pendingAcceptResponse = await existingMemberEmployeeAgent.post(
+      `/api/me/business-invites/${approvalInviteId}/accept`,
+    );
+    expect(pendingAcceptResponse.status).toBe(200);
+    expect(pendingAcceptResponse.body.data.approvalStatus).toBe("pending");
+
+    const pendingResponse = await ownerAgent.get(
+      `/api/businesses/${businessId}/invites/pending-approval`,
+    );
+    expect(pendingResponse.status).toBe(200);
+    const pendingInvite = pendingResponse.body.data.items.find(
+      (item: { id: string }) => item.id === approvalInviteId,
+    );
+    expect(pendingInvite.membershipContext).toMatchObject({
+      membershipId: membership._id.toString(),
+      status: "active",
+      currentRole: {
+        id: viewerRoleId,
+        name: "Viewer",
+      },
+      roleOutcome: "preserve_current",
+    });
+
+    const rejectionResponse = await ownerAgent.post(
+      `/api/businesses/${businessId}/invites/${approvalInviteId}/reject-approval`,
+    );
+    expect(rejectionResponse.status).toBe(200);
+
     const employee = await Employee.create({
       businessId,
       employeeListId,

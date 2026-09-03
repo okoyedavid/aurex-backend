@@ -64,11 +64,38 @@ type PopulatedRoleRef = {
   deniedPermissions: string[];
 };
 
+export type InviteMembershipRole = {
+  id: string;
+  name: string;
+  key: string;
+  type: string;
+  permissions: string[];
+  deniedPermissions: string[];
+};
+
+export type InviteMembershipContext = {
+  membershipId: string | null;
+  status: "none" | "active" | "suspended" | "removed";
+  currentRole: InviteMembershipRole | null;
+  roleOutcome:
+    | "apply_requested"
+    | "preserve_current"
+    | "blocked_suspended"
+    | "blocked_existing_member";
+};
+
 type PopulatedEmployeeRef = {
   _id: Types.ObjectId;
   fullName: string;
   jobTitle?: string;
-  employeeListId: Types.ObjectId;
+  employeeListId: {
+    _id: Types.ObjectId;
+    name: string;
+  };
+  employeeTypeId?: Types.ObjectId | null;
+  groupIds: Types.ObjectId[];
+  employmentStartDate?: Date | null;
+  state?: string | null;
   businessMemberId?: Types.ObjectId | null;
   status: string;
   accountVerificationStatus: string;

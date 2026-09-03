@@ -9,6 +9,8 @@ import type { UserRepository } from "../users/user.repository.js";
 import type { BusinessInviteRepository } from "./business-invite.repository.js";
 import {
   CreateBusinessInvitePayload,
+  InviteMembershipContext,
+  InviteMembershipRole,
   InvitePaginationInput,
 } from "./business-invite.types.js";
 import { EmployeeRepository } from "../employee/employee.repository.js";
@@ -28,6 +30,10 @@ type CreateBusinessInviteServiceDependencies = {
 };
 
 type PopulatedRole = {
+  _id?: unknown;
+  name?: string;
+  key?: string;
+  type?: string;
   permissions?: string[];
   deniedPermissions?: string[];
 };
@@ -64,6 +70,69 @@ const getDocumentName = (value: unknown, fallback: string) => {
   return fallback;
 };
 
+const serializeMembershipRole = (
+  value: unknown,
+): InviteMembershipRole | null => {
+  if (!value || typeof value !== "object" || !("_id" in value)) {
+    return null;
+  }
+
+  const role = value as PopulatedRole;
+  if (
+    typeof role.name !== "string" ||
+    typeof role.key !== "string" ||
+    typeof role.type !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    id: String(role._id),
+    name: role.name,
+    key: role.key,
+    type: role.type,
+    permissions: role.permissions ?? [],
+    deniedPermissions: role.deniedPermissions ?? [],
+  };
+};
+
+const createMembershipContext = (
+  membership: {
+    _id: unknown;
+    status: "active" | "suspended" | "removed";
+    roleId: unknown;
+  } | null,
+  inviteType: "MEMBER" | "EMPLOYEE",
+): InviteMembershipContext => {
+  if (!membership || membership.status === "removed") {
+    return {
+      membershipId: membership ? String(membership._id) : null,
+      status: membership?.status ?? "none",
+      currentRole: serializeMembershipRole(membership?.roleId),
+      roleOutcome: "apply_requested",
+    };
+  }
+
+  if (membership.status === "suspended") {
+    return {
+      membershipId: String(membership._id),
+      status: membership.status,
+      currentRole: serializeMembershipRole(membership.roleId),
+      roleOutcome: "blocked_suspended",
+    };
+  }
+
+  return {
+    membershipId: String(membership._id),
+    status: membership.status,
+    currentRole: serializeMembershipRole(membership.roleId),
+    roleOutcome:
+      inviteType === "EMPLOYEE"
+        ? "preserve_current"
+        : "blocked_existing_member",
+  };
+};
+
 export const createBusinessInviteService = ({
   businessInviteRepository,
   businessMemberRepository,
@@ -75,6 +144,13 @@ export const createBusinessInviteService = ({
   employeeRepository,
   employeeService,
 }: CreateBusinessInviteServiceDependencies) => {
+  const activeMemberId = async (businessId: string, userId: string) => {
+    const member = await businessMemberRepository.findActiveMembershipByBusinessAndUser(
+      businessId,
+      userId,
+    ).catch(() => null);
+    return member ? getDocumentId(member) : null;
+  };
   const getRoleAssignmentDecision = async ({
     businessId,
     invitedByUserId,
@@ -120,8 +196,7 @@ export const createBusinessInviteService = ({
       (permission) => !targetDenials.has(permission),
     );
     const exceedsInviter = targetPermissions.some(
-      (permission) =>
-        !inviterPermissions.has(permission),
+      (permission) => !inviterPermissions.has(permission),
     );
 
     const canAssignRole =
@@ -179,7 +254,10 @@ export const createBusinessInviteService = ({
         );
 
       if (!reactivatedMembership) {
-        throw createHttpError("Business membership could not be reactivated", 409);
+        throw createHttpError(
+          "Business membership could not be reactivated",
+          409,
+        );
       }
 
       return reactivatedMembership;
@@ -325,10 +403,7 @@ export const createBusinessInviteService = ({
           existingUser._id.toString(),
         );
 
-      if (
-        existingMembership?.status === "active" &&
-        inviteType === "MEMBER"
-      ) {
+      if (existingMembership?.status === "active" && inviteType === "MEMBER") {
         throw createHttpError("This user is already a business member", 409);
       }
     }
@@ -365,12 +440,18 @@ export const createBusinessInviteService = ({
         inviteType,
         employeeId: employeeId ?? null,
       };
+      const inviterMemberId = await activeMemberId(businessId, invitedByUserId);
 
       const eventWrites = [
         auditEventService.recordEventSafely({
           eventType: "business.invite.created",
           category: "business",
           outcome: "success",
+          businessId,
+          actorBusinessMemberId: inviterMemberId,
+          employeeId: employeeId ?? null,
+          subjectType: "invitation",
+          subjectId: inviteId,
           userId: invitedByUserId,
           email: null,
           metadata: eventMetadata,
@@ -509,90 +590,97 @@ export const createBusinessInviteService = ({
 
     const { membershipActivated, membershipCreated } = await withTransaction(
       async (session) => {
-      const invite = await getRecipientInvite({ inviteId, email, session });
-      const businessId = invite.businessId.toString();
-      const employeeId = invite.employeeId?.toString() ?? null;
-      const roleId = invite.roleId.toString();
-      const inviteType = invite.type;
-      const existingMembership =
-        await businessMemberRepository.findMembershipByBusinessAndUser(
-          businessId,
-          userId,
-          { session },
-        );
-
-      if (existingMembership?.status === "active" && inviteType === "MEMBER") {
-        throw createHttpError("You are already a member of this business", 409);
-      }
-
-      if (existingMembership?.status === "suspended") {
-        throw createHttpError(
-          "A suspended membership must be restored by a business administrator",
-          409,
-        );
-      }
-
-      const { canAssignRole, actorPermissions } =
-        await getRoleAssignmentDecision({
-        businessId,
-        invitedByUserId: invite.invitedByUserId.toString(),
-        roleId,
-        session,
-      });
-
-      if (employeeId) {
-        const employee = await employeeRepository.findByIdAndBusiness(
-          employeeId,
-          businessId,
-          { session },
-        );
-
-        if (!employee) {
-          throw createHttpError("Employee not found in this business", 404);
-        }
-      }
-
-      const activeEmployeeMembership =
-        inviteType === "EMPLOYEE" && existingMembership?.status === "active";
-      const roleCanBeApplied = activeEmployeeMembership || canAssignRole;
-      const employeeCanBeHandled =
-        inviteType === "MEMBER" ||
-        (employeeId !== null && actorPermissions.has("employees:update"));
-      const canCompleteInvite = roleCanBeApplied && employeeCanBeHandled;
-
-      if (canCompleteInvite) {
-        const membership = await activateMembershipForInvite({
-          businessId,
-          userId,
-          roleId,
-          invitedByUserId: invite.invitedByUserId.toString(),
-          inviteType,
-          session,
-        });
-
-        if (inviteType === "EMPLOYEE" && employeeId) {
-          await linkEmployeeToMembership({
-            employeeId,
+        const invite = await getRecipientInvite({ inviteId, email, session });
+        const businessId = invite.businessId.toString();
+        const employeeId = invite.employeeId?.toString() ?? null;
+        const roleId = invite.roleId.toString();
+        const inviteType = invite.type;
+        const existingMembership =
+          await businessMemberRepository.findMembershipByBusinessAndUser(
             businessId,
-            businessMemberId: membership._id.toString(),
+            userId,
+            { session },
+          );
+
+        if (
+          existingMembership?.status === "active" &&
+          inviteType === "MEMBER"
+        ) {
+          throw createHttpError(
+            "You are already a member of this business",
+            409,
+          );
+        }
+
+        if (existingMembership?.status === "suspended") {
+          throw createHttpError(
+            "A suspended membership must be restored by a business administrator",
+            409,
+          );
+        }
+
+        const { canAssignRole, actorPermissions } =
+          await getRoleAssignmentDecision({
+            businessId,
+            invitedByUserId: invite.invitedByUserId.toString(),
+            roleId,
             session,
           });
+
+        if (employeeId) {
+          const employee = await employeeRepository.findByIdAndBusiness(
+            employeeId,
+            businessId,
+            { session },
+          );
+
+          if (!employee) {
+            throw createHttpError("Employee not found in this business", 404);
+          }
         }
-      }
 
-      const acceptedInvite = await businessInviteRepository.acceptPendingInvite(
-        inviteId,
-        userId,
-        canCompleteInvite ? "not_required" : "pending",
-        { session },
-      );
+        const activeEmployeeMembership =
+          inviteType === "EMPLOYEE" && existingMembership?.status === "active";
+        const roleCanBeApplied = activeEmployeeMembership || canAssignRole;
+        const employeeCanBeHandled =
+          inviteType === "MEMBER" ||
+          (employeeId !== null && actorPermissions.has("employees:update"));
+        const canCompleteInvite = roleCanBeApplied && employeeCanBeHandled;
 
-      if (!acceptedInvite) {
-        throw createHttpError(
-          "Business invitation is no longer available",
-          409,
-        );
-      }
+        if (canCompleteInvite) {
+          const membership = await activateMembershipForInvite({
+            businessId,
+            userId,
+            roleId,
+            invitedByUserId: invite.invitedByUserId.toString(),
+            inviteType,
+            session,
+          });
+
+          if (inviteType === "EMPLOYEE" && employeeId) {
+            await linkEmployeeToMembership({
+              employeeId,
+              businessId,
+              businessMemberId: membership._id.toString(),
+              session,
+            });
+          }
+        }
+
+        const acceptedInvite =
+          await businessInviteRepository.acceptPendingInvite(
+            inviteId,
+            userId,
+            canCompleteInvite ? "not_required" : "pending",
+            { session },
+          );
+
+        if (!acceptedInvite) {
+          throw createHttpError(
+            "Business invitation is no longer available",
+            409,
+          );
+        }
 
         return {
           membershipActivated: canCompleteInvite,
@@ -608,16 +696,27 @@ export const createBusinessInviteService = ({
       const businessId = getDocumentId(businessInvite.businessId);
       const inviterUserId = getDocumentId(businessInvite.invitedByUserId);
       const roleId = getDocumentId(businessInvite.roleId);
+      const linkedEmployeeId = businessInvite.employeeId
+        ? getDocumentId(businessInvite.employeeId)
+        : null;
       const businessName = getDocumentName(
         businessInvite.businessId,
         "the business",
       );
+      const [inviterMemberId, acceptingMemberId] = await Promise.all([
+        activeMemberId(businessId, inviterUserId),
+        activeMemberId(businessId, userId),
+      ]);
 
       const events = [
         auditEventService.recordEventSafely({
           eventType: "business.invite.accepted",
           category: "business",
           outcome: "success",
+          businessId,
+          actorBusinessMemberId: acceptingMemberId,
+          subjectType: "invitation",
+          subjectId: inviteId,
           userId: inviterUserId,
           email: null,
           metadata: { businessId, inviteId, roleId },
@@ -636,6 +735,11 @@ export const createBusinessInviteService = ({
             : "business.invite.approval_requested",
           category: "business",
           outcome: "success",
+          businessId,
+          actorBusinessMemberId: acceptingMemberId,
+          subjectBusinessMemberId: membershipActivated ? acceptingMemberId : null,
+          subjectType: membershipActivated ? "member" : "invitation",
+          subjectId: membershipActivated && acceptingMemberId ? acceptingMemberId : inviteId,
           userId,
           email,
           metadata: { businessId, inviteId, roleId },
@@ -652,6 +756,29 @@ export const createBusinessInviteService = ({
               },
         }),
       );
+
+      if (membershipActivated && linkedEmployeeId && acceptingMemberId) {
+        events.push(
+          auditEventService.recordEventSafely({
+            eventType: "business.employee.updated",
+            category: "business",
+            outcome: "success",
+            businessId,
+            actorBusinessMemberId: acceptingMemberId,
+            subjectBusinessMemberId: acceptingMemberId,
+            employeeId: linkedEmployeeId,
+            subjectType: "employee",
+            subjectId: linkedEmployeeId,
+            userId,
+            email,
+            changes: {
+              fields: ["businessMemberId"],
+              before: { businessMemberId: null },
+              after: { businessMemberId: acceptingMemberId },
+            },
+          }),
+        );
+      }
 
       await Promise.all(events);
     }
@@ -691,10 +818,16 @@ export const createBusinessInviteService = ({
         "the business",
       );
 
+      const decliningMemberId = await activeMemberId(businessId, userId);
+
       await auditEventService.recordEventSafely({
         eventType: "business.invite.declined",
         category: "business",
         outcome: "success",
+        businessId,
+        actorBusinessMemberId: decliningMemberId,
+        subjectType: "invitation",
+        subjectId: inviteId,
         userId: inviterUserId,
         email: null,
         metadata: { businessId, inviteId, roleId },
@@ -725,8 +858,37 @@ export const createBusinessInviteService = ({
         limit,
       });
 
+    const acceptedUserIds = items
+      .map((invite) => invite.acceptedByUserId)
+      .filter((userId): userId is NonNullable<typeof userId> => Boolean(userId))
+      .map(getDocumentId);
+    const memberships = acceptedUserIds.length
+      ? await businessMemberRepository.findMembershipsByBusinessAndUsers(
+          businessId,
+          acceptedUserIds,
+        )
+      : [];
+    const membershipByUserId = new Map(
+      memberships.map((membership) => [
+        getDocumentId(membership.userId),
+        membership,
+      ]),
+    );
+
     return {
-      items,
+      items: items.map((invite) => {
+        const acceptedUserId = invite.acceptedByUserId
+          ? getDocumentId(invite.acceptedByUserId)
+          : null;
+        const membership = acceptedUserId
+          ? (membershipByUserId.get(acceptedUserId) ?? null)
+          : null;
+
+        return {
+          ...invite.toJSON(),
+          membershipContext: createMembershipContext(membership, invite.type),
+        };
+      }),
       pagination: {
         page,
         limit,
@@ -770,11 +932,11 @@ export const createBusinessInviteService = ({
       const existingEmployeeId = invite.employeeId?.toString() ?? null;
       const { canAssignRole, actorPermissions } =
         await getRoleAssignmentDecision({
-        businessId,
-        invitedByUserId: approvedByUserId,
-        roleId,
-        session,
-      });
+          businessId,
+          invitedByUserId: approvedByUserId,
+          roleId,
+          session,
+        });
 
       if (!canAssignRole) {
         throw createHttpError(
@@ -823,6 +985,17 @@ export const createBusinessInviteService = ({
       ) {
         throw createHttpError(
           "You need employees:create to create the employee record",
+          403,
+        );
+      }
+
+      if (
+        inviteType === "EMPLOYEE" &&
+        !existingEmployeeId &&
+        !actorPermissions.has("employee_lists:view")
+      ) {
+        throw createHttpError(
+          "You need employee_lists:view to select the employee list",
           403,
         );
       }
@@ -890,16 +1063,28 @@ export const createBusinessInviteService = ({
     if (businessInvite?.acceptedByUserId) {
       const userId = getDocumentId(businessInvite.acceptedByUserId);
       const roleId = getDocumentId(businessInvite.roleId);
+      const linkedEmployeeId = businessInvite.employeeId
+        ? getDocumentId(businessInvite.employeeId)
+        : null;
       const businessName = getDocumentName(
         businessInvite.businessId,
         "the business",
       );
+      const [approverMemberId, acceptedMemberId] = await Promise.all([
+        activeMemberId(businessId, approvedByUserId),
+        activeMemberId(businessId, userId),
+      ]);
 
       await Promise.all([
         auditEventService.recordEventSafely({
           eventType: "business.invite.approved",
           category: "business",
           outcome: "success",
+          businessId,
+          actorBusinessMemberId: approverMemberId,
+          subjectBusinessMemberId: acceptedMemberId,
+          subjectType: "invitation",
+          subjectId: inviteId,
           userId: approvedByUserId,
           email: null,
           metadata: { businessId, inviteId, roleId },
@@ -908,6 +1093,11 @@ export const createBusinessInviteService = ({
           eventType: "business.membership.activated",
           category: "business",
           outcome: "success",
+          businessId,
+          actorBusinessMemberId: approverMemberId,
+          subjectBusinessMemberId: acceptedMemberId,
+          subjectType: "member",
+          subjectId: acceptedMemberId,
           userId,
           email: businessInvite.email,
           metadata: { businessId, inviteId, roleId },
@@ -917,6 +1107,30 @@ export const createBusinessInviteService = ({
             severity: "info",
           },
         }),
+        ...(linkedEmployeeId && acceptedMemberId
+          ? [auditEventService.recordEventSafely({
+              eventType: employee
+                ? "business.employee.created"
+                : "business.employee.updated",
+              category: "business",
+              outcome: "success",
+              businessId,
+              actorBusinessMemberId: approverMemberId,
+              subjectBusinessMemberId: acceptedMemberId,
+              employeeId: linkedEmployeeId,
+              subjectType: "employee",
+              subjectId: linkedEmployeeId,
+              userId,
+              email: businessInvite.email,
+              changes: employee
+                ? undefined
+                : {
+                    fields: ["businessMemberId"],
+                    before: { businessMemberId: null },
+                    after: { businessMemberId: acceptedMemberId },
+                  },
+            })]
+          : []),
       ]);
     }
 
@@ -952,20 +1166,16 @@ export const createBusinessInviteService = ({
         businessInvite.businessId,
         "the business",
       );
+      const rejectingMemberId = await activeMemberId(businessId, rejectedByUserId);
 
-      await Promise.all([
-        auditEventService.recordEventSafely({
+      await auditEventService.recordEventSafely({
           eventType: "business.invite.approval_rejected",
           category: "business",
           outcome: "success",
-          userId: rejectedByUserId,
-          email: null,
-          metadata: { businessId, inviteId, roleId },
-        }),
-        auditEventService.recordEventSafely({
-          eventType: "business.invite.approval_rejected",
-          category: "business",
-          outcome: "success",
+          businessId,
+          actorBusinessMemberId: rejectingMemberId,
+          subjectType: "invitation",
+          subjectId: inviteId,
           userId: recipientUserId,
           email: businessInvite.email,
           metadata: { businessId, inviteId, roleId },
@@ -974,8 +1184,7 @@ export const createBusinessInviteService = ({
             message: `Your request to join ${businessName} was not approved.`,
             severity: "warning",
           },
-        }),
-      ]);
+        });
     }
 
     return { businessInvite };

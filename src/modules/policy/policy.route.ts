@@ -7,6 +7,13 @@ import * as schemas from "./policy.validators.js";
 
 const router = Router({ mergeParams: true });
 const guarded = (permission: Parameters<typeof requireBusinessPermission>[0], schema: Parameters<typeof validate>[0], handler: RequestHandler) => [protect, validate(schema), requireBusinessPermission(permission), handler] as const;
+const auditGuarded = (schema: Parameters<typeof validate>[0], handler: RequestHandler) => [
+  protect,
+  validate(schema),
+  requireBusinessPermission("audit_logs:view"),
+  requireBusinessPermission("policies:view_audit"),
+  handler,
+] as const;
 
 router.get("/:businessId/policy-categories", ...guarded("policies:view", schemas.listCategoriesSchema, policyController.listCategories));
 router.post("/:businessId/policy-categories", ...guarded("policies:create", schemas.createCategorySchema, policyController.createCategory));
@@ -33,9 +40,9 @@ router.post("/:businessId/employees/:employeeId/policies/reconcile", ...guarded(
 router.post("/:businessId/employees/:employeeId/policies/:policyId/manual", ...guarded("policies:assign", schemas.manualAssignmentSchema, policyController.createManualAssignment));
 router.post("/:businessId/employees/:employeeId/policies/:policyId/manual/end", ...guarded("policies:assign", schemas.endManualAssignmentSchema, policyController.endManualAssignment));
 router.post("/:businessId/policies/reconcile", ...guarded("policies:reconcile", schemas.reconcileBusinessSchema, policyController.reconcileBusiness));
-router.get("/:businessId/policy-audit", ...guarded("policies:view_audit", schemas.listAuditSchema, policyController.listAudit));
-router.get("/:businessId/employees/:employeeId/policy-history", ...guarded("policies:view_audit", schemas.employeeHistorySchema, policyController.employeeHistory));
-router.get("/:businessId/policies/:policyId/history", ...guarded("policies:view_audit", schemas.policyHistorySchema, policyController.policyHistory));
-router.get("/:businessId/policy-rules/:ruleId/history", ...guarded("policies:view_audit", schemas.ruleHistorySchema, policyController.ruleHistory));
+router.get("/:businessId/policy-audit", ...auditGuarded(schemas.listAuditSchema, policyController.listAudit));
+router.get("/:businessId/employees/:employeeId/policy-history", ...auditGuarded(schemas.employeeHistorySchema, policyController.employeeHistory));
+router.get("/:businessId/policies/:policyId/history", ...auditGuarded(schemas.policyHistorySchema, policyController.policyHistory));
+router.get("/:businessId/policy-rules/:ruleId/history", ...auditGuarded(schemas.ruleHistorySchema, policyController.ruleHistory));
 
 export { router as policyRouter };

@@ -54,6 +54,14 @@ const findEmployeeListByBusinessAndId = (
   employeeListId: string,
 ) => EmployeeList.findOne({ _id: employeeListId, businessId });
 
+const findEmployeeListsByBusinessAndIds = (
+  businessId: string,
+  employeeListIds: string[],
+) =>
+  EmployeeList.find({ businessId, _id: { $in: employeeListIds } }).select(
+    "name",
+  );
+
 const findActiveEmployeeListsByBusinessId = (
   businessId: string,
   options: QueryOptions = {},
@@ -96,6 +104,7 @@ export const employeeListRepository = {
   findActiveEmployeeListsByBusinessId,
   findEmployeeListById,
   findEmployeeListByBusinessAndId,
+  findEmployeeListsByBusinessAndIds,
   findEmployeeListsByBusinessId,
   paginateEmployeeListsByBusinessId,
   updateEmployeeListById,

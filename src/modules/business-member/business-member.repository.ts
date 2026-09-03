@@ -45,6 +45,18 @@ const findMembershipByBusinessAndUser = (
     options.session ?? null,
   );
 
+const findMembershipsByBusinessAndUsers = (
+  businessId: string,
+  userIds: string[],
+  options: RepositoryOptions = {},
+) =>
+  BusinessMember.find({ businessId, userId: { $in: userIds } })
+    .session(options.session ?? null)
+    .populate({
+      path: "roleId",
+      select: "name key type permissions deniedPermissions status",
+    });
+
 const reactivateBusinessMember = (
   memberId: string,
   payload: { roleId: string; invitedByUserId: string },
@@ -190,6 +202,7 @@ export const businessMemberRepository = {
   countAssignedMembersByRole,
   findBusinessMemberByBusinessAndId,
   findMembershipByBusinessAndUser,
+  findMembershipsByBusinessAndUsers,
   findActiveMembershipByBusinessAndUser,
   paginateBusinessMembersByBusinessId,
   findActiveMembershipsByUserId,

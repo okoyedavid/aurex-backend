@@ -294,7 +294,8 @@ Accepted invitation awaiting approval
   -> requested role must still exist and be active
   -> requested permissions must be a subset of approver permissions
   -> existing employee links require employees:update
-  -> missing employee data requires employees:create and an employee-list selection
+  -> missing employee data requires employees:create, employee_lists:view,
+     and an employee-list selection
   -> membership and employee changes commit with approval in one transaction
 ```
 

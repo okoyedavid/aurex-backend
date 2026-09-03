@@ -6,6 +6,8 @@ export default defineConfig({
       "src/modules/policy-rule/**/*.test.ts",
       "src/modules/policy/**/*.test.ts",
       "src/modules/warp-demo/**/*.test.ts",
+      "src/modules/employee/**/*.test.ts",
+      "src/modules/audit-feed/**/*.test.ts",
       "src/queues/**/*.test.ts",
     ],
     exclude: ["**/*.route.test.ts"],

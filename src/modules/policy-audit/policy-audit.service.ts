@@ -1,5 +1,6 @@
 import type { ClientSession } from "mongoose";
 import type { PolicyAuditRepository } from "./policy-audit.repository.js";
+import { mapPolicyAuditEvent } from "../audit-feed/audit-feed.dto.js";
 
 export type PolicyAuditActor = {
   actorType: "user" | "system" | "worker";
@@ -55,7 +56,10 @@ export const createPolicyAuditService = (repository: PolicyAuditRepository) => {
       page,
       limit,
     );
-    return { items, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return {
+      items: items.map((item) => mapPolicyAuditEvent(item)),
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   };
 
   return { list, record };

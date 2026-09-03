@@ -42,7 +42,11 @@ const invitePopulations = [
   {
     path: "employeeId",
     select:
-      "fullName jobTitle employeeListId businessMemberId status accountVerificationStatus",
+      "fullName jobTitle employeeListId employeeTypeId groupIds employmentStartDate state businessMemberId status accountVerificationStatus",
+    populate: {
+      path: "employeeListId",
+      select: "name",
+    },
   },
 ];
 
