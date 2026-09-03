@@ -9,6 +9,7 @@ import {
 import { CloudinaryService } from "../../services/cloudinary.service.js";
 import { HttpError } from "../../utils/api-error.js";
 import type { EmployeeListService } from "../employee-list/employee-list.service.js";
+import type { AuditEventService } from "../audit-event/audit-event.service.js";
 
 const serializeMembershipBusiness = (membership: {
   id: string;
@@ -53,6 +54,7 @@ export type CreateBusinessDependencies = {
   cloudinaryService: CloudinaryService;
   createHttpError: (message: string, statusCode: number) => HttpError;
   employeeListService: EmployeeListService;
+  auditEventService: AuditEventService;
 };
 
 const createBusinessService = ({
@@ -63,7 +65,23 @@ const createBusinessService = ({
   withTransaction,
   cloudinaryService,
   employeeListService,
+  auditEventService,
 }: CreateBusinessDependencies) => {
+  const recordBusinessUpdate = async (businessId: string, userId: string) => {
+    const member = await businessMemberRepository.findActiveMembershipByBusinessAndUser(businessId, userId).catch(() => null);
+    await auditEventService.recordEventSafely({
+      eventType: "business.updated",
+      category: "business",
+      outcome: "success",
+      businessId,
+      actorBusinessMemberId: member ? String(member.id) : null,
+      subjectType: "business",
+      subjectId: businessId,
+      userId,
+      email: null,
+      changes: { fields: ["profileImage"], before: { profileImage: "[changed]" }, after: { profileImage: "[changed]" } },
+    });
+  };
   const deleteCloudinaryImageSafely = async (
     imageUrl: string | null | undefined,
   ) => {
@@ -86,7 +104,7 @@ const createBusinessService = ({
       createData.profile_img = profile_img;
     }
 
-    return withTransaction(async (mongoSession) => {
+    const result = await withTransaction(async (mongoSession) => {
       const business = await businessRepository.createBusiness(createData, {
         session: mongoSession,
       });
@@ -122,6 +140,21 @@ const createBusinessService = ({
 
       return { business };
     });
+    const ownerMember = await businessMemberRepository
+      .findActiveMembershipByBusinessAndUser(result.business.id, ownerUserId)
+      .catch(() => null);
+    await auditEventService.recordEventSafely({
+      eventType: "business.created",
+      category: "business",
+      outcome: "success",
+      businessId: result.business.id,
+      actorBusinessMemberId: ownerMember ? String(ownerMember.id) : null,
+      subjectType: "business",
+      subjectId: result.business.id,
+      userId: ownerUserId,
+      email: null,
+    });
+    return result;
   };
 
   const listBusinesses = async ({
@@ -200,6 +233,8 @@ const createBusinessService = ({
         ? previousBusiness.profile_img
         : null;
 
+    if (previousProfileImage === profile_img) return previousBusiness;
+
     const updatedBusiness = await businessRepository.updateBusinessById(
       businessId,
       {
@@ -214,6 +249,8 @@ const createBusinessService = ({
     if (previousProfileImage && previousProfileImage !== profile_img) {
       await deleteCloudinaryImageSafely(previousProfileImage);
     }
+
+    await recordBusinessUpdate(businessId, userId);
 
     return updatedBusiness;
   };
@@ -241,6 +278,8 @@ const createBusinessService = ({
         ? previousBusiness.profile_img
         : null;
 
+    if (!previousProfileImage) return previousBusiness;
+
     const updatedBusiness = await businessRepository.updateBusinessById(
       businessId,
       {
@@ -253,6 +292,7 @@ const createBusinessService = ({
     }
 
     await deleteCloudinaryImageSafely(previousProfileImage);
+    await recordBusinessUpdate(businessId, userId);
 
     return updatedBusiness;
   };

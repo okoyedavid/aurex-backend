@@ -23,6 +23,51 @@ const auditEventSchema = new mongoose.Schema(
       default: "info",
       index: true,
     },
+    businessId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Business",
+      default: null,
+      index: true,
+    },
+    actorBusinessMemberId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessMember",
+      default: null,
+      index: true,
+    },
+    subjectBusinessMemberId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessMember",
+      default: null,
+      index: true,
+    },
+    employeeId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Employee",
+      default: null,
+      index: true,
+    },
+    subjectType: {
+      type: String,
+      enum: [
+        "business",
+        "member",
+        "employee",
+        "employee_type",
+        "employee_group",
+        "invitation",
+        "account",
+        "session",
+        "security",
+      ],
+      default: null,
+      index: true,
+    },
+    subjectId: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+      index: true,
+    },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -55,6 +100,10 @@ auditEventSchema.index({ userId: 1, createdAt: -1 });
 auditEventSchema.index({ emailHash: 1, createdAt: -1 });
 auditEventSchema.index({ ipAddress: 1, createdAt: -1 });
 auditEventSchema.index({ eventType: 1, createdAt: -1 });
+auditEventSchema.index({ businessId: 1, createdAt: -1 });
+auditEventSchema.index({ businessId: 1, actorBusinessMemberId: 1, createdAt: -1 });
+auditEventSchema.index({ businessId: 1, subjectBusinessMemberId: 1, createdAt: -1 });
+auditEventSchema.index({ businessId: 1, employeeId: 1, createdAt: -1 });
 
 export type AuditEventDocument = InferSchemaType<typeof auditEventSchema>;
 
@@ -69,6 +118,23 @@ export type CreateAuditEventPayload = {
     | "business";
   outcome: "success" | "failure" | "blocked";
   severity?: "info" | "warning" | "error" | "critical";
+
+  businessId?: mongoose.Types.ObjectId | string | null;
+  actorBusinessMemberId?: mongoose.Types.ObjectId | string | null;
+  subjectBusinessMemberId?: mongoose.Types.ObjectId | string | null;
+  employeeId?: mongoose.Types.ObjectId | string | null;
+  subjectType?:
+    | "business"
+    | "member"
+    | "employee"
+    | "employee_type"
+    | "employee_group"
+    | "invitation"
+    | "account"
+    | "session"
+    | "security"
+    | null;
+  subjectId?: mongoose.Types.ObjectId | string | null;
 
   userId?: mongoose.Types.ObjectId | string | null;
   emailHash?: string | null;

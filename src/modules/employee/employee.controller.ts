@@ -2,8 +2,11 @@ import { asyncHandler } from "../../utils/async-handler.js";
 import { EmployeeService } from "./employee.service.js";
 import {
   createEmployeeSchema,
+  getBusinessEmployeeSchema,
   getEmployeeSchema,
+  listBusinessEmployeesSchema,
   listEmployeesSchema,
+  updateBusinessEmployeeSchema,
   updateEmployeeSchema,
 } from "./employee.validators.js";
 
@@ -72,6 +75,25 @@ export const CreateEmployeeController = ({
     });
   });
 
+  const listBusinessEmployees = asyncHandler(async (req, res) => {
+    const { businessId } = listBusinessEmployeesSchema.shape.params.parse(
+      req.validatedParams,
+    );
+    const query = listBusinessEmployeesSchema.shape.query.parse(
+      req.validatedQuery,
+    );
+    const result = await employeeService.listBusinessEmployees({
+      businessId,
+      ...query,
+    });
+
+    return res.status(200).json({
+      data: result,
+      message: "Business employees retrieved successfully",
+      success: true,
+    });
+  });
+
   const getEmployee = asyncHandler(async (req, res) => {
     const params = getEmployeeSchema.shape.params.parse(req.validatedParams);
     const { employee } = await employeeService.getEmployee(params);
@@ -79,6 +101,19 @@ export const CreateEmployeeController = ({
     return res.status(200).json({
       data: employee,
       message: "Employee retrieved successfully",
+      success: true,
+    });
+  });
+
+  const getBusinessEmployee = asyncHandler(async (req, res) => {
+    const params = getBusinessEmployeeSchema.shape.params.parse(
+      req.validatedParams,
+    );
+    const { employee } = await employeeService.getEmployeeProfile(params);
+
+    return res.status(200).json({
+      data: employee,
+      message: "Employee profile retrieved successfully",
       success: true,
     });
   });
@@ -99,5 +134,33 @@ export const CreateEmployeeController = ({
     });
   });
 
-  return { createEmployee, getEmployee, listEmployees, updateEmployee };
+  const updateBusinessEmployee = asyncHandler(async (req, res) => {
+    const params = updateBusinessEmployeeSchema.shape.params.parse(
+      req.validatedParams,
+    );
+    const updates = updateBusinessEmployeeSchema.shape.body.parse(
+      req.validatedBody,
+    );
+    const { employee } = await employeeService.updateBusinessEmployee({
+      ...params,
+      updates,
+      requestedBy: req.user?.id,
+    });
+
+    return res.status(200).json({
+      data: employee,
+      message: "Employee profile updated successfully",
+      success: true,
+    });
+  });
+
+  return {
+    createEmployee,
+    getBusinessEmployee,
+    getEmployee,
+    listBusinessEmployees,
+    listEmployees,
+    updateBusinessEmployee,
+    updateEmployee,
+  };
 };

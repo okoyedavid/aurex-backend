@@ -45,6 +45,7 @@ export const createEmployeeTypeController = ({
     const result = await employeeTypeService.createEmployeeType(
       businessId,
       body,
+      req.user?.id,
     );
     return res.status(result.created ? 201 : 200).json({
       data: result.employeeType,
@@ -66,6 +67,7 @@ export const createEmployeeTypeController = ({
     const { employeeType } = await employeeTypeService.updateEmployeeType({
       ...params,
       updates,
+      requestedBy: req.user?.id,
     });
     return res.status(200).json({
       data: employeeType,

@@ -113,3 +113,12 @@ export type FindEmployeesFilters = {
   paymentStatus?: EmployeePaymentStatus;
   status?: EmployeeStatus;
 };
+
+export type BusinessEmployeeListFilters = {
+  search?: string;
+  employeeListId?: string;
+  employeeTypeId?: string;
+  groupId?: string;
+  state?: string;
+  status?: EmployeeStatus;
+};

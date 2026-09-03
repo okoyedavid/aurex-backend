@@ -29,6 +29,14 @@ const findActiveByBusinessAndId = (
     options,
   );
 
+const findByBusinessAndIds = (
+  businessId: string,
+  employeeTypeIds: string[],
+) =>
+  EmployeeType.find({ businessId, _id: { $in: employeeTypeIds } }).select(
+    "name description status",
+  );
+
 const findByBusinessAndTemplateKey = (
   businessId: string,
   sourceTemplateKey: string,
@@ -75,6 +83,7 @@ export const employeeTypeRepository = {
   createEmployeeType,
   findActiveByBusinessAndId,
   findByBusinessAndId,
+  findByBusinessAndIds,
   findByBusinessAndName,
   findByBusinessAndTemplateKey,
   paginateByBusiness,

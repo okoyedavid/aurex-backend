@@ -7,6 +7,7 @@ import { createBusinessController } from "./business.controller.js";
 import { businessRepository } from "./business.repository.js";
 import { createBusinessService } from "./business.service.js";
 import { employeeListService } from "../employee-list/employee-list.module.js";
+import { auditEventService } from "../audit-event/audit-event.module.js";
 
 export const businessService = createBusinessService({
   businessRepository,
@@ -16,6 +17,7 @@ export const businessService = createBusinessService({
   createHttpError,
   cloudinaryService,
   employeeListService,
+  auditEventService,
 });
 
 export const businessController = createBusinessController({

@@ -34,7 +34,15 @@ export type RecordSecurityEvent = {
     | "business.membership.activated"
     | "business.member.role_updated"
     | "business.member.status_updated"
-    | "business.member.removed";
+    | "business.member.removed"
+    | "business.created"
+    | "business.updated"
+    | "business.employee.created"
+    | "business.employee.updated"
+    | "business.employee_type.created"
+    | "business.employee_type.updated"
+    | "business.employee_group.created"
+    | "business.employee_group.updated";
 
   category:
     | "security"
@@ -48,6 +56,12 @@ export type RecordSecurityEvent = {
   email: string | null;
   userSessionId?: string | null;
   authSessionId?: string | null;
+  businessId?: string | null;
+  actorBusinessMemberId?: string | null;
+  subjectBusinessMemberId?: string | null;
+  employeeId?: string | null;
+  subjectType?: CreateAuditEventPayload["subjectType"];
+  subjectId?: string | null;
 
   reason?:
     | "rate_limit_exceeded"

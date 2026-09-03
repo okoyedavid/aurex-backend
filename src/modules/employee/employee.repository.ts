@@ -3,9 +3,13 @@ import { RepositoryOptions } from "../../types/repository-types.js";
 import { Employee, EmployeeDocument } from "./employee.model.js";
 import {
   CreateEmployeePayload,
+  BusinessEmployeeListFilters,
   FindEmployeesFilters,
   UpdateEmployeePayload,
 } from "./employee.types.js";
+
+export const escapeEmployeeSearch = (value: string) =>
+  value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const createEmployee = (
   payload: CreateEmployeePayload,
@@ -24,6 +28,14 @@ const findByIdAndBusiness = (
   businessId: string,
   options: QueryOptions = {},
 ) => Employee.findOne({ businessId, _id: employeeId }, null, options);
+
+const findByIdsAndBusiness = (
+  businessId: string,
+  employeeIds: string[],
+) =>
+  Employee.find({ businessId, _id: { $in: employeeIds } }).select(
+    "fullName jobTitle",
+  );
 
 const findByBusinessMember = (
   businessId: string,
@@ -156,6 +168,49 @@ const paginateEmployeesByList = async ({
   return { items, total };
 };
 
+const paginateEmployeesByBusiness = async ({
+  businessId,
+  page,
+  limit,
+  filters,
+}: {
+  businessId: string;
+  page: number;
+  limit: number;
+  filters: BusinessEmployeeListFilters;
+}) => {
+  const query: QueryFilter<EmployeeDocument> = {
+    businessId,
+    ...(filters.status
+      ? { status: filters.status }
+      : { status: { $ne: "archived" } }),
+  };
+
+  if (filters.employeeListId) query.employeeListId = filters.employeeListId;
+  if (filters.employeeTypeId) query.employeeTypeId = filters.employeeTypeId;
+  if (filters.groupId) query.groupIds = filters.groupId;
+  if (filters.state) {
+    query.state = new RegExp(
+      `^${escapeEmployeeSearch(filters.state)}$`,
+      "i",
+    );
+  }
+  if (filters.search) {
+    const search = new RegExp(escapeEmployeeSearch(filters.search), "i");
+    query.$or = [{ fullName: search }, { jobTitle: search }];
+  }
+
+  const [items, total] = await Promise.all([
+    Employee.find(query)
+      .sort({ fullName: 1, _id: 1 })
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Employee.countDocuments(query),
+  ]);
+
+  return { items, total };
+};
+
 const findEmployeeByBusinessListAndId = (
   businessId: string,
   employeeListId: string,
@@ -168,6 +223,17 @@ const updateEmployeeById = (
   options: QueryOptions = {},
 ) =>
   Employee.findByIdAndUpdate(employeeId, payload, {
+    returnDocument: "after",
+    ...options,
+  });
+
+const updateEmployeeByBusinessAndId = (
+  businessId: string,
+  employeeId: string,
+  payload: UpdateEmployeePayload,
+  options: QueryOptions = {},
+) =>
+  Employee.findOneAndUpdate({ _id: employeeId, businessId }, payload, {
     returnDocument: "after",
     ...options,
   });
@@ -197,6 +263,15 @@ const updateVerificationResult = (
   payload: UpdateQuery<EmployeeDocument>,
 ) =>
   Employee.findByIdAndUpdate(employeeId, payload, {
+    returnDocument: "after",
+  });
+
+const updateVerificationResultByBusiness = (
+  businessId: string,
+  employeeId: string,
+  payload: UpdateQuery<EmployeeDocument>,
+) =>
+  Employee.findOneAndUpdate({ _id: employeeId, businessId }, payload, {
     returnDocument: "after",
   });
 
@@ -252,6 +327,7 @@ export const employeeRepository = {
   claimNextVerification,
   claimForBusinessMember,
   findByIdAndBusiness,
+  findByIdsAndBusiness,
   findByBusinessMember,
   countVerificationStatesByEmployeeListId,
   createEmployee,
@@ -263,8 +339,11 @@ export const employeeRepository = {
   findEmployeesByEmployeeListId,
   findActiveEmployeesBatchByBusiness,
   paginateEmployeesByList,
+  paginateEmployeesByBusiness,
   updateEmployeeById,
+  updateEmployeeByBusinessAndId,
   updateVerificationResult,
+  updateVerificationResultByBusiness,
 };
 
 export type EmployeeRepository = typeof employeeRepository;

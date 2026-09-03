@@ -139,6 +139,9 @@ employeeSchema.index(
 
 employeeSchema.index({ businessId: 1, status: 1 });
 employeeSchema.index({ businessId: 1, employeeListId: 1, status: 1 });
+employeeSchema.index({ businessId: 1, employeeTypeId: 1, status: 1 });
+employeeSchema.index({ businessId: 1, groupIds: 1, status: 1 });
+employeeSchema.index({ businessId: 1, state: 1, status: 1 });
 employeeSchema.index({
   businessId: 1,
   employeeListId: 1,

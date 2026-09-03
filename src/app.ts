@@ -20,6 +20,7 @@ import { paystackRouter } from "./modules/paystack/paystack.route.js";
 import { employeeListRouter } from "./modules/employee-list/employee-list.route.js";
 import { employeeTypeRouter } from "./modules/employee-type/employee-type.route.js";
 import { employeeGroupRouter } from "./modules/employee-group/employee-group.route.js";
+import { businessEmployeeRouter } from "./modules/employee/business-employee.route.js";
 import {
   businessInviteRouter,
   userBusinessInviteRouter,
@@ -28,6 +29,7 @@ import { notificationRouter } from "./modules/notification/notification.route.js
 import { roleRouter } from "./modules/role/role.route.js";
 import { policyRouter } from "./modules/policy/policy.route.js";
 import { warpDemoRouter } from "./modules/warp-demo/warp-demo.route.js";
+import { auditFeedRouter } from "./modules/audit-feed/audit-feed.route.js";
 
 const app = express();
 
@@ -71,6 +73,8 @@ app.use("/api/businesses/:businessId/roles", roleRouter);
 app.use("/api/businesses/:businessId/employee-lists", employeeListRouter);
 app.use("/api/businesses/:businessId/employee-types", employeeTypeRouter);
 app.use("/api/businesses/:businessId/employee-groups", employeeGroupRouter);
+app.use("/api/businesses/:businessId/employees", businessEmployeeRouter);
+app.use("/api/businesses/:businessId/audit", auditFeedRouter);
 app.use("/api/businesses", policyRouter);
 app.use("/api/me/business-invites", userBusinessInviteRouter);
 app.use("/api/me/notifications", notificationRouter);

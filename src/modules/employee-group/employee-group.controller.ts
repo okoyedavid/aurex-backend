@@ -47,6 +47,7 @@ export const createEmployeeGroupController = ({
     const result = await employeeGroupService.createEmployeeGroup(
       businessId,
       body,
+      req.user?.id,
     );
     return res.status(result.created ? 201 : 200).json({
       data: result.employeeGroup,
@@ -68,6 +69,7 @@ export const createEmployeeGroupController = ({
     const { employeeGroup } = await employeeGroupService.updateEmployeeGroup({
       ...params,
       updates,
+      requestedBy: req.user?.id,
     });
     return res.status(200).json({
       data: employeeGroup,
