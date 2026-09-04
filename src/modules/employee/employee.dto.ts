@@ -15,6 +15,13 @@ export type EmployeeRelations = {
   employeeTypes: Map<string, EmployeeTypeSource>;
   groups: Map<string, EmployeeGroupSource>;
   managers: Map<string, EmployeeSource>;
+  linkedAccounts: Map<string, LinkedAccountProfile>;
+};
+
+export type LinkedAccountProfile = {
+  businessMemberId: string;
+  email: string;
+  avatar: string | null;
 };
 
 const id = (value: unknown) => String(value);
@@ -38,6 +45,24 @@ const tenure = (employee: EmployeeSource, asOf: Date) =>
   employee.employmentStartDate
     ? calculateTenureMonths(employee.employmentStartDate, asOf)
     : null;
+
+const account = (employee: EmployeeSource, relations: EmployeeRelations) => {
+  const businessMemberId = employee.businessMemberId
+    ? id(employee.businessMemberId)
+    : null;
+  const linkedAccount = businessMemberId
+    ? relations.linkedAccounts.get(businessMemberId)
+    : null;
+
+  return linkedAccount
+    ? {
+        linked: true as const,
+        businessMemberId: linkedAccount.businessMemberId,
+        email: linkedAccount.email,
+        avatar: linkedAccount.avatar,
+      }
+    : { linked: false as const };
+};
 
 const basicRelations = (
   employee: EmployeeSource,
@@ -67,21 +92,26 @@ export const mapEmployeeSummary = (
   employee: EmployeeSource,
   relations: EmployeeRelations,
   asOf = new Date(),
-) => ({
-  id: employee.id,
-  fullName: employee.fullName,
-  jobTitle: employee.jobTitle ?? null,
-  ...basicRelations(employee, relations),
-  state: employee.state ?? null,
-  tenureMonths: tenure(employee, asOf),
-  status: employee.status,
-  accountLinked: Boolean(employee.businessMemberId),
-  bank: {
-    bankName: employee.bankName ?? null,
-    maskedAccountNumber: maskAccountNumber(employee.accountNumber),
-    verificationStatus: employee.accountVerificationStatus,
-  },
-});
+) => {
+  const linkedAccount = account(employee, relations);
+
+  return {
+    id: employee.id,
+    fullName: employee.fullName,
+    jobTitle: employee.jobTitle ?? null,
+    ...basicRelations(employee, relations),
+    state: employee.state ?? null,
+    tenureMonths: tenure(employee, asOf),
+    status: employee.status,
+    accountLinked: linkedAccount.linked,
+    account: linkedAccount,
+    bank: {
+      bankName: employee.bankName ?? null,
+      maskedAccountNumber: maskAccountNumber(employee.accountNumber),
+      verificationStatus: employee.accountVerificationStatus,
+    },
+  };
+};
 
 export const mapEmployeeDetail = (
   employee: EmployeeSource,
@@ -94,6 +124,9 @@ export const mapEmployeeDetail = (
   const manager = employee.managerEmployeeId
     ? relations.managers.get(id(employee.managerEmployeeId))
     : null;
+  const managerAccount = manager
+    ? account(manager, relations)
+    : { linked: false as const };
   const summaryRelations = basicRelations(employee, relations);
 
   return {
@@ -128,17 +161,14 @@ export const mapEmployeeDetail = (
           id: manager.id,
           fullName: manager.fullName,
           jobTitle: manager.jobTitle ?? null,
+          email: managerAccount.linked ? managerAccount.email : null,
+          avatar: managerAccount.linked ? managerAccount.avatar : null,
         }
       : null,
     state: employee.state ?? null,
     employmentStartDate: employee.employmentStartDate ?? null,
     tenureMonths: tenure(employee, asOf),
-    account: {
-      linked: Boolean(employee.businessMemberId),
-      ...(employee.businessMemberId
-        ? { businessMemberId: id(employee.businessMemberId) }
-        : {}),
-    },
+    account: account(employee, relations),
     payroll: {
       payFrequency: employee.payFrequency ?? null,
       amount: employee.amount,

@@ -345,7 +345,6 @@ const createEmployeeService = ({
         ),
       ),
     ];
-
     const [departments, employeeTypes, groups, managers] = await Promise.all([
       employeeListRepository.findEmployeeListsByBusinessAndIds(
         businessId,
@@ -358,12 +357,29 @@ const createEmployeeService = ({
       employeeGroupRepository.findByBusinessAndIds(businessId, groupIds),
       employeeRepository.findByIdsAndBusiness(businessId, managerIds),
     ]);
+    const businessMemberIds = [
+      ...new Set(
+        [...employees, ...managers].flatMap((employee) =>
+          employee.businessMemberId
+            ? [String(employee.businessMemberId)]
+            : [],
+        ),
+      ),
+    ];
+    const linkedAccounts =
+      await businessMemberRepository.findLinkedAccountProfilesByBusinessAndIds(
+        businessId,
+        businessMemberIds,
+      );
 
     return {
       departments: new Map(departments.map((item) => [item.id, item])),
       employeeTypes: new Map(employeeTypes.map((item) => [item.id, item])),
       groups: new Map(groups.map((item) => [item.id, item])),
       managers: new Map(managers.map((item) => [item.id, item])),
+      linkedAccounts: new Map(
+        linkedAccounts.map((item) => [item.businessMemberId, item]),
+      ),
     };
   };
 

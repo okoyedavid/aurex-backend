@@ -57,6 +57,37 @@ const findMembershipsByBusinessAndUsers = (
       select: "name key type permissions deniedPermissions status",
     });
 
+const findLinkedAccountProfilesByBusinessAndIds = async (
+  businessId: string,
+  memberIds: string[],
+) => {
+  if (memberIds.length === 0) return [];
+
+  const members = await BusinessMember.find({
+    _id: { $in: memberIds },
+    businessId,
+    status: { $ne: "removed" },
+  })
+    .select("_id userId")
+    .populate({ path: "userId", select: "email avatar" })
+    .lean();
+
+  return members.flatMap((member) => {
+    const user = member.userId as unknown as {
+      email?: unknown;
+      avatar?: unknown;
+    } | null;
+
+    if (!user || typeof user.email !== "string") return [];
+
+    return [{
+      businessMemberId: String(member._id),
+      email: user.email,
+      avatar: typeof user.avatar === "string" ? user.avatar : null,
+    }];
+  });
+};
+
 const reactivateBusinessMember = (
   memberId: string,
   payload: { roleId: string; invitedByUserId: string },
@@ -201,6 +232,7 @@ export const businessMemberRepository = {
   createBusinessMember,
   countAssignedMembersByRole,
   findBusinessMemberByBusinessAndId,
+  findLinkedAccountProfilesByBusinessAndIds,
   findMembershipByBusinessAndUser,
   findMembershipsByBusinessAndUsers,
   findActiveMembershipByBusinessAndUser,

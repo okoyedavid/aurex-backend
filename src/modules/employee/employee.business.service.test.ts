@@ -14,6 +14,8 @@ const listId = "68b000000000000000000003";
 const typeId = "68b000000000000000000004";
 const groupId = "68b000000000000000000005";
 const managerId = "68b000000000000000000006";
+const businessMemberId = "68b000000000000000000007";
+const managerBusinessMemberId = "68b000000000000000000008";
 
 const employee = (overrides: Record<string, unknown> = {}) =>
   ({
@@ -42,11 +44,11 @@ const employee = (overrides: Record<string, unknown> = {}) =>
     ...overrides,
   }) as unknown as EmployeeSource;
 
-const setup = () => {
-  let storedEmployee = employee();
+const setup = (employeeOverrides: Record<string, unknown> = {}) => {
+  let storedEmployee = employee(employeeOverrides);
   const employeeRepository = {
-    findByIdAndBusiness: vi.fn(async (id: string, requestedBusinessId: string) => id === employeeId && requestedBusinessId === businessId ? storedEmployee : id === managerId && requestedBusinessId === businessId ? employee({ id: managerId, fullName: "Sarah Chen", jobTitle: "VP Engineering", managerEmployeeId: null }) : null),
-    findByIdsAndBusiness: vi.fn(async () => [employee({ id: managerId, fullName: "Sarah Chen", jobTitle: "VP Engineering", managerEmployeeId: null })]),
+    findByIdAndBusiness: vi.fn(async (id: string, requestedBusinessId: string) => id === employeeId && requestedBusinessId === businessId ? storedEmployee : id === managerId && requestedBusinessId === businessId ? employee({ id: managerId, fullName: "Sarah Chen", jobTitle: "VP Engineering", businessMemberId: managerBusinessMemberId, managerEmployeeId: null }) : null),
+    findByIdsAndBusiness: vi.fn(async () => [employee({ id: managerId, fullName: "Sarah Chen", jobTitle: "VP Engineering", businessMemberId: managerBusinessMemberId, managerEmployeeId: null })]),
     paginateEmployeesByBusiness: vi.fn(async ({ businessId: requestedBusinessId }: { businessId: string }) => ({ items: requestedBusinessId === businessId ? [storedEmployee] : [], total: requestedBusinessId === businessId ? 1 : 0 })),
     updateEmployeeByBusinessAndId: vi.fn(async (_businessId: string, _employeeId: string, updates: Record<string, unknown>) => { storedEmployee = employee({ ...storedEmployee, ...updates }); return storedEmployee; }),
     updateVerificationResultByBusiness: vi.fn(),
@@ -67,17 +69,31 @@ const setup = () => {
   };
   const createHttpError = (message: string, statusCode: number) => Object.assign(new Error(message), { statusCode });
   const auditEventService = { recordEventSafely: vi.fn() };
+  const businessMemberRepository = {
+    findActiveMembershipByBusinessAndUser: vi.fn(async () => null),
+    findLinkedAccountProfilesByBusinessAndIds: vi.fn(
+      async (_businessId: string, memberIds: string[]) =>
+        [
+          ...(memberIds.includes(businessMemberId)
+            ? [{ businessMemberId, email: "maya@example.com", avatar: "https://example.com/maya.jpg" }]
+            : []),
+          ...(memberIds.includes(managerBusinessMemberId)
+            ? [{ businessMemberId: managerBusinessMemberId, email: "sarah@example.com", avatar: "https://example.com/sarah.jpg" }]
+            : []),
+        ],
+    ),
+  };
   const service = createEmployeeService({
     employeeRepository: employeeRepository as unknown as EmployeeRepository,
     employeeListRepository: employeeListRepository as unknown as EmployeeListRepository,
     employeeTypeRepository: employeeTypeRepository as unknown as EmployeeTypeRepository,
     employeeGroupRepository: employeeGroupRepository as unknown as EmployeeGroupRepository,
     auditEventService: auditEventService as never,
-    businessMemberRepository: { findActiveMembershipByBusinessAndUser: vi.fn(async () => null) } as never,
+    businessMemberRepository: businessMemberRepository as never,
     withTransaction: vi.fn() as never,
     createHttpError,
   });
-  return { service, employeeRepository, employeeListRepository, auditEventService };
+  return { service, employeeRepository, employeeListRepository, auditEventService, businessMemberRepository };
 };
 
 describe("business-scoped employee service", () => {
@@ -85,7 +101,8 @@ describe("business-scoped employee service", () => {
   it("passes search and every supported filter to the repository", async () => { const { service, employeeRepository } = setup(); await service.listBusinessEmployees({ businessId, page: 2, limit: 10, search: "maya", employeeListId: listId, employeeTypeId: typeId, groupId, state: "California", status: "active" }); expect(employeeRepository.paginateEmployeesByBusiness).toHaveBeenCalledWith({ businessId, page: 2, limit: 10, filters: { search: "maya", employeeListId: listId, employeeTypeId: typeId, groupId, state: "California", status: "active" } }); });
   it("returns complete pagination navigation fields", async () => { const { service } = setup(); const result = await service.listBusinessEmployees({ businessId, page: 1, limit: 1 }); expect(result.pagination).toEqual({ page: 1, limit: 1, total: 1, totalPages: 1, hasNextPage: false, hasPreviousPage: false }); });
   it("returns human-readable relations from batched lookups", async () => { const { service } = setup(); expect((await service.listBusinessEmployees({ businessId, page: 1, limit: 20 })).items[0]).toMatchObject({ fullName: "Maya Patel", department: { name: "Engineering" }, employeeType: { name: "Full Time" }, groups: [{ name: "Remote" }] }); });
-  it("returns a canonical profile with manager and tenure", async () => { const { service } = setup(); const result = await service.getEmployeeProfile({ businessId, employeeId }); expect(result.employee).toMatchObject({ manager: { fullName: "Sarah Chen" }, department: { name: "Engineering" }, tenureMonths: expect.any(Number) }); });
+  it("returns the safe linked account profile from a batched lookup", async () => { const { service, businessMemberRepository } = setup({ businessMemberId }); const item = (await service.listBusinessEmployees({ businessId, page: 1, limit: 20 })).items[0]; expect(item).toMatchObject({ accountLinked: true, account: { linked: true, businessMemberId, email: "maya@example.com", avatar: "https://example.com/maya.jpg" } }); expect(businessMemberRepository.findLinkedAccountProfilesByBusinessAndIds).toHaveBeenCalledWith(businessId, [businessMemberId, managerBusinessMemberId]); });
+  it("returns a canonical profile with the manager's linked account and tenure", async () => { const { service } = setup(); const result = await service.getEmployeeProfile({ businessId, employeeId }); expect(result.employee).toMatchObject({ manager: { fullName: "Sarah Chen", email: "sarah@example.com", avatar: "https://example.com/sarah.jpg" }, department: { name: "Engineering" }, tenureMonths: expect.any(Number) }); });
   it("returns 404 for an employee from another business", async () => { const { service } = setup(); await expect(service.getEmployeeProfile({ businessId: otherBusinessId, employeeId })).rejects.toMatchObject({ statusCode: 404 }); });
   it("preserves old list-scoped detail behavior", async () => { const { service } = setup(); expect((await service.getEmployee({ businessId, employeeListId: listId, employeeId })).employee.fullName).toBe("Maya Patel"); });
   it("rejects the old detail route when the list does not match", async () => { const { service } = setup(); await expect(service.getEmployee({ businessId, employeeListId: otherBusinessId, employeeId })).rejects.toMatchObject({ statusCode: 404 }); });
