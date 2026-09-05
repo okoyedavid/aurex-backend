@@ -55,6 +55,8 @@ const updateRule = (businessId: string, ruleId: string, updates: UpdateQuery<unk
   PolicyRule.findOneAndUpdate({ _id: ruleId, businessId }, updates, { returnDocument: "after", runValidators: true, session });
 const findEffectiveRules = (businessId: string, asOf: Date) =>
   PolicyRule.find({ businessId, status: "active", ...effectiveAt(asOf) }).sort({ priority: -1, _id: 1 });
+const findRulesByIds = (businessId: string, ruleIds: string[]) =>
+  PolicyRule.find({ businessId, _id: { $in: ruleIds } }).select("name");
 
 const findActiveAssignments = (businessId: string, employeeId: string, { session }: Options = {}) =>
   EmployeePolicyAssignment.find({ businessId, employeeId, status: "active" }).session(session ?? null);
@@ -88,6 +90,7 @@ export const policyRepository = {
   findEffectiveRules,
   findPolicy,
   findRule,
+  findRulesByIds,
   listCategories,
   listPolicies,
   listRules,

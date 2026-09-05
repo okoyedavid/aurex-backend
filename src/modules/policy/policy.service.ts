@@ -10,6 +10,7 @@ import type { PolicyAuditService } from "../policy-audit/policy-audit.service.js
 import type { PolicyRepository } from "./policy.repository.js";
 import { enqueuePolicyReconciliation } from "../../queues/policy-reconciliation.queue.js";
 import { Types } from "mongoose";
+import { githubTarget } from "../github-integration/github-integration.types.js";
 
 type Dependencies = {
   repository: PolicyRepository;
@@ -20,6 +21,7 @@ type Dependencies = {
   employeeGroupRepository: EmployeeGroupRepository;
   withTransaction: WithTransaction;
   createHttpError: (message: string, statusCode: number) => HttpError;
+  validateExternalTarget?: (businessId: string, target: NonNullable<ReturnType<typeof githubTarget>>) => Promise<void>;
 };
 
 const id = (value: unknown) => String(value);
@@ -41,7 +43,10 @@ const hasMeaningfulChanges = (
   existing: object,
   updates: Record<string, unknown>,
 ) => {
-  const current = existing as Record<string, unknown>;
+  const current =
+    "toObject" in existing && typeof existing.toObject === "function"
+      ? (existing.toObject() as Record<string, unknown>)
+      : (existing as Record<string, unknown>);
   return Object.entries(updates).some(
     ([key, value]) =>
       JSON.stringify(comparable(current[key])) !==
@@ -67,6 +72,7 @@ export const createPolicyService = ({
   employeeGroupRepository,
   withTransaction,
   createHttpError,
+  validateExternalTarget,
 }: Dependencies) => {
   const actor = async (businessId: string, userId: string) => {
     const member = await businessMemberRepository.findActiveMembershipByBusinessAndUser(businessId, userId);
@@ -123,6 +129,8 @@ export const createPolicyService = ({
 
   const createPolicy = async (businessId: string, userId: string, input: { categoryId: string; name: string; description?: string | null; configuration?: Record<string, unknown>; effectiveFrom?: Date | null; effectiveTo?: Date | null }) => {
     const auditActor = await actor(businessId, userId);
+    const target = githubTarget(input.configuration);
+    if (target && validateExternalTarget) await validateExternalTarget(businessId, target);
     return withTransaction(async (session) => {
       const category = await repository.findCategory(businessId, input.categoryId, { session });
       if (!category || category.status !== "active") throw createHttpError("Active policy category not found in this business", 400);
@@ -134,6 +142,8 @@ export const createPolicyService = ({
 
   const updatePolicy = async (businessId: string, policyId: string, userId: string, updates: Record<string, unknown>, action = "POLICY_UPDATED") => {
     const auditActor = await actor(businessId, userId);
+    const target = githubTarget(updates.configuration);
+    if (target && validateExternalTarget) await validateExternalTarget(businessId, target);
     const result = await withTransaction(async (session) => {
       const existing = await repository.findPolicy(businessId, policyId, { session });
       if (!existing) throw createHttpError("Policy not found", 404);
@@ -180,7 +190,7 @@ export const createPolicyService = ({
   const referenceIds = (condition: PolicyRuleCondition) => Array.isArray(condition.value) ? condition.value.map(id) : [id(condition.value)];
   const normalizeConditions = (conditions: PolicyRuleCondition[]) =>
     conditions.map((condition) => {
-      if (condition.field === "state" || condition.field === "tenure") return condition;
+      if (condition.field === "state" || condition.field === "status" || condition.field === "tenure") return condition;
       return {
         ...condition,
         value: Array.isArray(condition.value)
@@ -195,7 +205,7 @@ export const createPolicyService = ({
         if (!Number.isFinite(Number(condition.value)) || Number(condition.value) < 0) throw createHttpError("Tenure must be a non-negative number of months", 400);
         continue;
       }
-      if (condition.field === "state") continue;
+      if (condition.field === "state" || condition.field === "status") continue;
       const ids = referenceIds(condition);
       if (condition.field === "department") {
         const records = await Promise.all(ids.map((value) => employeeListRepository.findEmployeeListByBusinessAndId(businessId, value)));

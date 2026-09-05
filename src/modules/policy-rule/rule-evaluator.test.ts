@@ -14,6 +14,7 @@ const employeeContext: EmployeePolicyContext = {
   employeeTypeId: "type-1",
   groupIds: ["group-1", "group-2"],
   state: "CA",
+  status: "active",
   employmentStartDate: new Date("2024-08-31T00:00:00.000Z"),
 };
 
@@ -26,6 +27,7 @@ describe("policy rule evaluator", () => {
     [{ field: "employeeType", operator: "equals", value: "type-1" }, true],
     [{ field: "group", operator: "contains", value: "group-2" }, true],
     [{ field: "state", operator: "equals", value: "CA" }, true],
+    [{ field: "status", operator: "equals", value: "active" }, true],
     [{ field: "tenure", operator: "gte", value: 24 }, true],
   ] as const)("evaluates %o", (condition, matched) => {
     expect(evaluate(condition).matched).toBe(matched);

@@ -125,4 +125,58 @@ describe("policy reconciliation", () => {
       null,
     );
   });
+
+  it("adds current winning and matched rule names to assignment responses", async () => {
+    const automatic = assignment({ id: "a1", policyId: "p1", categoryId: "c1", winningRuleId: "r2", matchedRuleIds: ["r1", "r2"] });
+    const findRulesByIds = vi.fn().mockResolvedValue([{ id: "r1", name: "Engineering" }, { id: "r2", name: null }]);
+    const service = createPolicyReconciliationService({
+      repository: { findAssignmentsAsOf: vi.fn().mockResolvedValue([automatic]), findRulesByIds } as never,
+      employeeRepository: {} as never,
+      resolver: {} as never,
+      auditService: {} as never,
+      withTransaction: vi.fn() as never,
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+
+    const result = await service.getAssignments("b1", "e1", new Date());
+    expect(findRulesByIds).toHaveBeenCalledWith("b1", ["r2", "r1"]);
+    expect(result[0]).toMatchObject({
+      winningRuleId: "r2",
+      matchedRuleIds: ["r1", "r2"],
+      winningRule: { id: "r2", name: null },
+      matchedRules: [{ id: "r1", name: "Engineering" }, { id: "r2", name: null }],
+    });
+  });
+
+  it("omits deleted matched rules and nulls a deleted winning rule", async () => {
+    const automatic = assignment({ id: "a1", policyId: "p1", categoryId: "c1", winningRuleId: "r-deleted", matchedRuleIds: ["r-live", "r-deleted"] });
+    const service = createPolicyReconciliationService({
+      repository: { findAssignmentsAsOf: vi.fn().mockResolvedValue([automatic]), findRulesByIds: vi.fn().mockResolvedValue([{ id: "r-live", name: "Active employees" }]) } as never,
+      employeeRepository: {} as never,
+      resolver: {} as never,
+      auditService: {} as never,
+      withTransaction: vi.fn() as never,
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+
+    const result = await service.getAssignments("b1", "e1", new Date());
+    expect(result[0]).toMatchObject({ winningRule: null, matchedRules: [{ id: "r-live", name: "Active employees" }] });
+  });
+
+  it("returns empty rule details for manual assignments without querying rules", async () => {
+    const manual = assignment({ id: "m1", policyId: "p1", categoryId: "c1", source: "manual", winningRuleId: "legacy-rule", matchedRuleIds: ["legacy-rule"] });
+    const findRulesByIds = vi.fn();
+    const service = createPolicyReconciliationService({
+      repository: { findAssignmentsAsOf: vi.fn().mockResolvedValue([manual]), findRulesByIds } as never,
+      employeeRepository: {} as never,
+      resolver: {} as never,
+      auditService: {} as never,
+      withTransaction: vi.fn() as never,
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+
+    const result = await service.getAssignments("b1", "e1", new Date());
+    expect(result[0]).toMatchObject({ winningRuleId: "legacy-rule", matchedRuleIds: ["legacy-rule"], winningRule: null, matchedRules: [] });
+    expect(findRulesByIds).not.toHaveBeenCalled();
+  });
 });

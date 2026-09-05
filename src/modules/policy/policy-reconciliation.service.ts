@@ -160,7 +160,35 @@ export const createPolicyReconciliationService = ({
     return { assignment };
   };
 
-  const getAssignments = (businessId: string, employeeId: string, asOf: Date) => repository.findAssignmentsAsOf(businessId, employeeId, asOf);
+  const getAssignments = async (businessId: string, employeeId: string, asOf: Date) => {
+    const assignments = await repository.findAssignmentsAsOf(businessId, employeeId, asOf);
+    const ruleIds = [...new Set(assignments.flatMap((assignment) =>
+      assignment.source === "manual"
+        ? []
+        : [
+            ...(assignment.winningRuleId ? [id(assignment.winningRuleId)] : []),
+            ...(assignment.matchedRuleIds ?? []).map(id),
+          ],
+    ))];
+    const rules = ruleIds.length ? await repository.findRulesByIds(businessId, ruleIds) : [];
+    const rulesById = new Map(rules.map((rule) => [rule.id, { id: rule.id, name: rule.name ?? null }]));
+
+    return assignments.map((assignment) => {
+      const value = typeof assignment.toJSON === "function"
+        ? assignment.toJSON()
+        : assignment.toObject();
+      if (assignment.source === "manual") {
+        return { ...value, winningRule: null, matchedRules: [] };
+      }
+      const winningRule = assignment.winningRuleId
+        ? rulesById.get(id(assignment.winningRuleId)) ?? null
+        : null;
+      const matchedRules = (assignment.matchedRuleIds ?? [])
+        .map((ruleId) => rulesById.get(id(ruleId)))
+        .filter((rule): rule is { id: string; name: string | null } => Boolean(rule));
+      return { ...value, winningRule, matchedRules };
+    });
+  };
 
   return { createManualAssignment, endManualAssignment, getAssignments, reconcileEmployeePolicies };
 };

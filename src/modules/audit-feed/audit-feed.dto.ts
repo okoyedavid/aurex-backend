@@ -68,20 +68,90 @@ export const mapGeneralAuditEvent = (value: unknown) => {
     subject: subjectType
       ? { type: subjectType, displayName: subjectName ?? humanize(subjectType) }
       : null,
-    summary: `${humanize(action)}${subjectName ? `: ${subjectName}` : ""}`,
+    summary: typeof event.summary === "string" && event.summary
+      ? event.summary
+      : `${humanize(action)}${subjectName ? `: ${subjectName}` : ""}`,
     ...(safeChanges.length ? { changes: safeChanges } : {}),
     ...(typeof event.reason === "string" && event.reason ? { reason: event.reason } : {}),
   };
 };
 
-const policyName = (value: unknown) => nestedName(value) ?? "Policy";
+const nullableString = (value: unknown) =>
+  typeof value === "string" && value ? value : null;
+
+const policyReference = (event: JsonRecord) => {
+  const snapshot = record(event.policySnapshot);
+  const current = record(event.policyId);
+  const assignment = record(event.after);
+  const referenceId = nullableString(snapshot.id) ??
+    nullableString(current.id ?? current._id) ??
+    nullableString(assignment.policyId);
+
+  if (!referenceId) return null;
+
+  return {
+    id: referenceId,
+    version:
+      typeof snapshot.version === "number"
+        ? snapshot.version
+        : typeof current.version === "number"
+          ? current.version
+          : typeof assignment.policyVersion === "number"
+            ? assignment.policyVersion
+            : null,
+    displayName:
+      nullableString(snapshot.displayName) ??
+      nullableString(current.name) ??
+      "Policy",
+    description:
+      nullableString(snapshot.description) ?? nullableString(current.description),
+  };
+};
+
+const categoryReference = (event: JsonRecord) => {
+  const snapshot = record(event.categorySnapshot);
+  const current = record(event.categoryId);
+  const assignment = record(event.after);
+  const referenceId = nullableString(snapshot.id) ??
+    nullableString(current.id ?? current._id) ??
+    nullableString(assignment.categoryId);
+
+  if (!referenceId) return null;
+
+  return {
+    id: referenceId,
+    displayName:
+      nullableString(snapshot.displayName) ??
+      nullableString(current.name) ??
+      "Policy category",
+    description:
+      nullableString(snapshot.description) ?? nullableString(current.description),
+    cardinality:
+      snapshot.cardinality === "ONE" || snapshot.cardinality === "MANY"
+        ? snapshot.cardinality
+        : current.cardinality === "ONE" || current.cardinality === "MANY"
+          ? current.cardinality
+          : null,
+  };
+};
 
 export const mapPolicyAuditEvent = (value: unknown, personal = false) => {
   const event = record(value);
   const action = String(event.action ?? "unknown");
-  const name = policyName(event.policyId);
-  const actorName = nestedName(event.actorBusinessMemberId);
-  const employeeName = nestedName(event.employeeId);
+  const policy = policyReference(event);
+  const category = categoryReference(event);
+  const actorSnapshot = record(event.actorSnapshot);
+  const employeeSnapshot = record(event.employeeSnapshot);
+  const actorName =
+    nullableString(actorSnapshot.displayName) ??
+    nestedName(event.actorBusinessMemberId);
+  const employeeName =
+    nullableString(employeeSnapshot.displayName) ?? nestedName(event.employeeId);
+  const employeeId =
+    nullableString(employeeSnapshot.id) ??
+    nullableString(record(event.employeeId).id ?? record(event.employeeId)._id) ??
+    (typeof event.employeeId === "string" ? event.employeeId : null);
+  const name = policy?.displayName ?? "Policy";
   const ended = /ENDED/.test(action);
   const manual = /MANUAL/.test(action);
   const personalSummary = ended
@@ -89,6 +159,13 @@ export const mapPolicyAuditEvent = (value: unknown, personal = false) => {
     : action === "ASSIGNMENT_VERSION_UPDATED"
       ? `${name} was updated for you.`
       : `${name} was ${manual ? "manually " : ""}assigned to you.`;
+  const organizationSummary = employeeName
+    ? ended
+      ? `${name} ended for ${employeeName}.`
+      : action === "ASSIGNMENT_VERSION_UPDATED"
+        ? `${name} was updated for ${employeeName}.`
+        : `${name} was ${manual ? "manually " : ""}assigned to ${employeeName}.`
+    : `${humanize(action)}: ${name}`;
   const safeChanges = personal ? [] : changes({
     fields: event.changedFields,
     before: event.before,
@@ -106,10 +183,25 @@ export const mapPolicyAuditEvent = (value: unknown, personal = false) => {
           displayName: event.actorType === "user" ? actorName ?? "Business member" : "Aurex policy engine",
         }
       : null,
-    subject: event.employeeId
-      ? { type: "employee", displayName: personal ? "You" : employeeName ?? "Employee" }
-      : { type: "policy", displayName: name },
-    summary: personal ? personalSummary : `${humanize(action)}: ${name}`,
+    subject: employeeId
+      ? {
+          type: "employee",
+          ...(employeeId ? { id: employeeId } : {}),
+          displayName: personal ? "You" : employeeName ?? "Employee",
+        }
+      : {
+          type: "policy",
+          ...(policy ? { id: policy.id } : {}),
+          displayName: name,
+        },
+    policy,
+    category,
+    historicalSnapshotAvailable: Boolean(
+      Object.keys(record(event.policySnapshot)).length &&
+      Object.keys(record(event.categorySnapshot)).length &&
+      (!event.employeeId || Object.keys(employeeSnapshot).length),
+    ),
+    summary: personal ? personalSummary : organizationSummary,
     ...(safeChanges.length ? { changes: safeChanges } : {}),
     ...(typeof event.reason === "string" && event.reason ? { reason: event.reason } : {}),
   };

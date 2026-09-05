@@ -68,6 +68,7 @@ describe("policy assignment routes", () => {
 
     const ruleResponse = await agent.post(`/api/businesses/${businessId}/policies/${policyId}/rules`).send({ name: "California engineers", priority: 20, conditions: [{ field: "department", operator: "equals", value: employeeListId }, { field: "state", operator: "equals", value: "CA" }, { field: "tenure", operator: "gte", value: 12 }] });
     expect(ruleResponse.status).toBe(201);
+    const ruleId = ruleResponse.body.data.id as string;
 
     const explanation = await agent.get(`/api/businesses/${businessId}/employees/${employeeId}/policies/explain`);
     expect(explanation.status).toBe(200);
@@ -81,6 +82,12 @@ describe("policy assignment routes", () => {
 
     const policies = await agent.get(`/api/businesses/${businessId}/employees/${employeeId}/policies`);
     expect(policies.body.data.items).toHaveLength(1);
+    expect(policies.body.data.items[0]).toMatchObject({
+      winningRuleId: ruleId,
+      matchedRuleIds: [ruleId],
+      winningRule: { id: ruleId, name: "California engineers" },
+      matchedRules: [{ id: ruleId, name: "California engineers" }],
+    });
     const history = await agent.get(`/api/businesses/${businessId}/employees/${employeeId}/policy-history?page=1&limit=20`);
     expect(history.status).toBe(200);
     expect(history.body.data.items.some((item: { action: string }) => item.action === "ASSIGNMENT_CREATED")).toBe(true);

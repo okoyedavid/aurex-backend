@@ -30,6 +30,7 @@ import { roleRouter } from "./modules/role/role.route.js";
 import { policyRouter } from "./modules/policy/policy.route.js";
 import { warpDemoRouter } from "./modules/warp-demo/warp-demo.route.js";
 import { auditFeedRouter } from "./modules/audit-feed/audit-feed.route.js";
+import { githubIntegrationRouter } from "./modules/github-integration/github-integration.route.js";
 
 const app = express();
 
@@ -76,6 +77,7 @@ app.use("/api/businesses/:businessId/employee-groups", employeeGroupRouter);
 app.use("/api/businesses/:businessId/employees", businessEmployeeRouter);
 app.use("/api/businesses/:businessId/audit", auditFeedRouter);
 app.use("/api/businesses", policyRouter);
+app.use("/api/businesses", githubIntegrationRouter);
 app.use("/api/me/business-invites", userBusinessInviteRouter);
 app.use("/api/me/notifications", notificationRouter);
 app.use("/api/paystack", paystackRouter);

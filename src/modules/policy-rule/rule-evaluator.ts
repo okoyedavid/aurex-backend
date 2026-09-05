@@ -10,6 +10,7 @@ export type EmployeePolicyContext = {
   employeeTypeId: string | null;
   groupIds: string[];
   state: string | null;
+  status: string;
   employmentStartDate: Date | null;
 };
 
@@ -29,6 +30,7 @@ const allowedOperators: Record<PolicyRuleField, readonly PolicyRuleOperator[]> =
   employeeType: ["equals", "not_equals", "in", "not_in"],
   group: ["contains", "not_contains", "in", "not_in"],
   state: ["equals", "not_equals", "in", "not_in"],
+  status: ["equals", "not_equals", "in", "not_in"],
   tenure: ["equals", "not_equals", "gte", "lte", "gt", "lt"],
 };
 
@@ -76,6 +78,8 @@ const actualValueForField = (
       return context.groupIds;
     case "state":
       return context.state;
+    case "status":
+      return context.status;
     case "tenure":
       return calculateTenureMonths(context.employmentStartDate, evaluationDate);
   }
