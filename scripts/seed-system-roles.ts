@@ -40,8 +40,6 @@ const systemRoles = [
 async function seedSystemRoles() {
   const mongoUri = process.env.MONGO_URI;
 
-  const roleId = "6a432ab56ca5c52849396ff8";
-
   if (!mongoUri) {
     throw new Error("MONGO_URI is required");
   }
