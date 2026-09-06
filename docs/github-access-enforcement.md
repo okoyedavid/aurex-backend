@@ -68,14 +68,15 @@ cannot configure a resource from another installation.
 
 ## API
 
-All endpoints require authentication and normal business-scoped permission
-checks.
+The business endpoints require authentication and normal business-scoped
+permission checks. The browser callback is authenticated by its one-time state.
 
 ```http
 GET    /api/businesses/:businessId/integrations/github
 POST   /api/businesses/:businessId/integrations/github/install-url
-POST   /api/businesses/:businessId/integrations/github/complete
 DELETE /api/businesses/:businessId/integrations/github
+
+GET /api/integrations/github/callback?code=...&state=...
 
 GET /api/businesses/:businessId/integrations/github/repositories
 GET /api/businesses/:businessId/integrations/github/teams
@@ -93,25 +94,29 @@ The identity update body is:
 { "username": "demo-github-user" }
 ```
 
-The completion body is:
-
-```json
-{ "installationId": 12345678, "state": "value-returned-by-github" }
-```
-
 The install URL operation creates a cryptographically random, ten-minute state
-bound to the Aurex business. Completion atomically consumes that state, rejects
-an installation already assigned to another business, and verifies the
-installation using GitHub App authentication. The callback's `installation_id`
-is never trusted by itself.
+bound to the Aurex business, initiating user, and active session. GitHub sends
+the browser directly to the callback. The callback exchanges the OAuth code,
+identifies the authorized GitHub user, verifies that the installation is in the
+user's accessible installations, and verifies its metadata again using GitHub
+App authentication. The callback's optional `installation_id` is never trusted
+by itself.
 
 ## Data models
 
 ### GitHubConnection
 
 Stores business ID, installation ID, GitHub account metadata, repository
-selection, status, connection timestamp, and a temporary hashed installation
-state. Installation access tokens are never stored.
+selection, status, and connection timestamp. Installation access tokens are
+never stored.
+
+### GitHubInstallationAttempt
+
+Stores the SHA-256 state hash, business, initiating Aurex user/session,
+expiration, and pending/processing/consumed lifecycle. Raw state, OAuth codes,
+and OAuth user tokens are never stored. Legacy pending-state fields on existing
+GitHubConnection documents are ignored and are removed the next time that
+connection is activated or disconnected.
 
 ### EmployeeExternalIdentity
 

@@ -6,11 +6,11 @@ import { githubIntegrationController } from "./github-integration.module.js";
 import * as schemas from "./github-integration.validators.js";
 
 const router = Router({ mergeParams: true });
+const callbackRouter = Router();
 const guarded = (permission: Parameters<typeof requireBusinessPermission>[0], schema: Parameters<typeof validate>[0], handler: RequestHandler) => [protect, validate(schema), requireBusinessPermission(permission), handler] as const;
 
 router.get("/:businessId/integrations/github", ...guarded("integrations:view", schemas.connectionSchema, githubIntegrationController.getConnection));
 router.post("/:businessId/integrations/github/install-url", ...guarded("integrations:manage", schemas.connectionSchema, githubIntegrationController.createInstallUrl));
-router.post("/:businessId/integrations/github/complete", ...guarded("integrations:manage", schemas.completeInstallationSchema, githubIntegrationController.completeInstallation));
 router.delete("/:businessId/integrations/github", ...guarded("integrations:manage", schemas.connectionSchema, githubIntegrationController.disconnect));
 router.get("/:businessId/integrations/github/repositories", ...guarded("integrations:view", schemas.connectionSchema, githubIntegrationController.listRepositories));
 router.get("/:businessId/integrations/github/teams", ...guarded("integrations:view", schemas.connectionSchema, githubIntegrationController.listTeams));
@@ -20,4 +20,9 @@ router.put("/:businessId/employees/:employeeId/external-identities/github", ...g
 router.delete("/:businessId/employees/:employeeId/external-identities/github", ...guarded("employees:update", schemas.employeeIdentitySchema, githubIntegrationController.removeIdentity));
 router.get("/:businessId/employees/:employeeId/external-access", ...guarded("policies:view", schemas.employeeIdentitySchema, githubIntegrationController.getEmployeeAccess));
 
-export { router as githubIntegrationRouter };
+callbackRouter.get("/github/callback", githubIntegrationController.callback);
+
+export {
+  callbackRouter as githubCallbackRouter,
+  router as githubIntegrationRouter,
+};

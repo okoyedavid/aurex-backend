@@ -3,25 +3,52 @@ import { Policy } from "../policy/policy.model.js";
 import { EmployeeExternalIdentity } from "./employee-external-identity.model.js";
 import { ExternalAccessGrant } from "./external-access-grant.model.js";
 import { GitHubConnection } from "./github-connection.model.js";
+import { GitHubInstallationAttempt } from "./github-installation-attempt.model.js";
 import type { ActualAccessState, GitHubTarget } from "./github-integration.types.js";
 
-const publicConnectionSelect = "-pendingStateHash -pendingStateExpiresAt";
+const findConnection = (businessId: string) => GitHubConnection.findOne({ businessId });
+const findConnectionByInstallation = (installationId: number) => GitHubConnection.findOne({ installationId });
 
-const findConnection = (businessId: string, includePendingState = false) =>
-  GitHubConnection.findOne({ businessId }).select(includePendingState ? "+pendingStateHash +pendingStateExpiresAt" : publicConnectionSelect);
-const findConnectionByInstallation = (installationId: number) => GitHubConnection.findOne({ installationId }).select(publicConnectionSelect);
-const savePendingConnection = (businessId: string, pendingStateHash: string, pendingStateExpiresAt: Date) =>
-  GitHubConnection.findOneAndUpdate({ businessId }, { $set: { pendingStateHash, pendingStateExpiresAt } }, { upsert: true, returnDocument: "after", runValidators: true }).select(publicConnectionSelect);
-const consumePendingState = (businessId: string, pendingStateHash: string) =>
-  GitHubConnection.findOneAndUpdate(
-    { businessId, pendingStateHash, pendingStateExpiresAt: { $gt: new Date() } },
-    { $set: { pendingStateHash: null, pendingStateExpiresAt: null } },
-    { returnDocument: "before" },
-  ).select("+pendingStateHash +pendingStateExpiresAt");
+const createInstallationAttempt = (input: {
+  stateHash: string;
+  businessId: string;
+  initiatedByUserId: string;
+  initiatedByUserSessionId: string;
+  initiatedByAuthSessionId?: string | null;
+  expiresAt: Date;
+}) => GitHubInstallationAttempt.create(input);
+
+const claimInstallationAttempt = (stateHash: string) =>
+  GitHubInstallationAttempt.findOneAndUpdate(
+    {
+      stateHash,
+      expiresAt: { $gt: new Date() },
+      status: "pending",
+    },
+    { $set: { status: "processing", processingStartedAt: new Date() } },
+    { returnDocument: "after", runValidators: true },
+  );
+
+const findInstallationAttempt = (stateHash: string) =>
+  GitHubInstallationAttempt.findOne({ stateHash });
+
+const releaseInstallationAttempt = (attemptId: string) =>
+  GitHubInstallationAttempt.findOneAndUpdate(
+    { _id: attemptId, status: "processing" },
+    { $set: { status: "pending", processingStartedAt: null } },
+    { returnDocument: "after", runValidators: true },
+  );
+
+const consumeInstallationAttempt = (attemptId: string) =>
+  GitHubInstallationAttempt.findOneAndUpdate(
+    { _id: attemptId, status: "processing" },
+    { $set: { status: "consumed", consumedAt: new Date(), processingStartedAt: null } },
+    { returnDocument: "after", runValidators: true },
+  );
 const activateConnection = (businessId: string, installation: { id: number; account: { id: number; login: string; type: string }; repository_selection: string; suspended_at: string | null }) =>
-  GitHubConnection.findOneAndUpdate({ businessId }, { $set: { installationId: installation.id, accountId: installation.account.id, accountLogin: installation.account.login, accountType: installation.account.type, repositorySelection: installation.repository_selection, status: installation.suspended_at ? "suspended" : "active", connectedAt: new Date(), pendingStateHash: null, pendingStateExpiresAt: null } }, { upsert: true, returnDocument: "after", runValidators: true }).select(publicConnectionSelect);
+  GitHubConnection.findOneAndUpdate({ businessId }, { $set: { installationId: installation.id, accountId: installation.account.id, accountLogin: installation.account.login, accountType: installation.account.type, repositorySelection: installation.repository_selection, status: installation.suspended_at ? "suspended" : "active", connectedAt: new Date() }, $unset: { pendingStateHash: "", pendingStateExpiresAt: "" } }, { upsert: true, returnDocument: "after", runValidators: true });
 const disconnectConnection = (businessId: string) =>
-  GitHubConnection.findOneAndUpdate({ businessId }, { $set: { status: "disconnected", installationId: null, pendingStateHash: null, pendingStateExpiresAt: null } }, { returnDocument: "after", runValidators: true }).select(publicConnectionSelect);
+  GitHubConnection.findOneAndUpdate({ businessId }, { $set: { status: "disconnected", installationId: null }, $unset: { pendingStateHash: "", pendingStateExpiresAt: "" } }, { returnDocument: "after", runValidators: true });
 const markBusinessGrantsNeedsConfiguration = (businessId: string) => ExternalAccessGrant.updateMany({ businessId, provider: "github", managedByAurex: true }, { $set: { actualState: "needs_configuration", lastErrorCode: "github_connection_inactive", lastErrorMessage: "GitHub is disconnected for this business" } });
 
 const findIdentity = (businessId: string, employeeId: string) => EmployeeExternalIdentity.findOne({ businessId, employeeId, provider: "github" });
@@ -57,7 +84,9 @@ const listManagedGrantsBatch = (businessId: string, afterId: string | null, limi
 
 export const githubIntegrationRepository = {
   activateConnection,
-  consumePendingState,
+  claimInstallationAttempt,
+  consumeInstallationAttempt,
+  createInstallationAttempt,
   deleteIdentity,
   disconnectConnection,
   findActiveAssignmentsWithPolicies,
@@ -65,11 +94,12 @@ export const githubIntegrationRepository = {
   findConnectionByInstallation,
   findGrant,
   findIdentity,
+  findInstallationAttempt,
   listGrantsForEmployee,
   listManagedGrantsBatch,
   markBusinessGrantsNeedsConfiguration,
   markDesiredRevoked,
-  savePendingConnection,
+  releaseInstallationAttempt,
   updateGrantResult,
   upsertDesiredGrant,
   upsertIdentity,

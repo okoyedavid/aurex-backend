@@ -197,51 +197,32 @@ security `state` value.
 
 ### Complete installation
 
-GitHub redirects to the configured frontend setup page with query parameters
-including `installation_id`, `setup_action`, and `state`.
-
-The frontend setup page must:
-
-1. Require an authenticated Aurex user and active business context.
-2. Read `installation_id` and `state` exactly once.
-3. Validate only their basic shape client-side.
-4. Send them to the backend for authoritative verification.
-5. Never treat the query parameter alone as proof of installation ownership.
-6. Remove sensitive/transient callback query parameters from browser history
-   after processing, using the router's replace operation.
-7. Be safe against React Strict Mode or route remounts causing duplicate
-   completion requests. Use a stable mutation guard/idempotent effect pattern.
+GitHub redirects directly to the backend callback:
 
 ```http
-POST /api/businesses/:businessId/integrations/github/complete
-Content-Type: application/json
-
-{
-  "installationId": 12345678,
-  "state": "opaque-state-returned-by-github"
-}
+GET /api/integrations/github/callback?code=...&state=...
 ```
 
-The backend atomically consumes the one-time state, verifies the installation
-with GitHub App authentication, and rejects expired, reused, spoofed, or
-cross-business installations.
+The frontend must not parse GitHub OAuth parameters or call a completion API.
+The backend validates the one-time state, verifies the authorized GitHub user
+and installation, and redirects the browser to the business integration page.
 
-Handle these callback outcomes deliberately:
+Handle the resulting safe query parameters:
 
-- `setup_action=install`: complete normally.
-- `setup_action=update`: refresh connection status; complete only if valid
-  installation and state values are present.
-- User cancelled or required parameters missing: show a recoverable cancelled
-  state and a button to start again.
-- Expired or already-used state: explain that the connection attempt expired
-  and provide “Try again.”
-- Installation belongs to another Aurex business: show a conflict message; do
-  not retry automatically.
-- Suspended installation: show connection as suspended and block resource
-  configuration until corrected in GitHub.
+- `github=connected`: show success and invalidate/refetch connection,
+  repository, team, policy, and relevant external-access queries.
+- `github=error&reason=invalid_state` or `expired_state`: offer “Try again.”
+- `github=error&reason=authorization_failed`: explain that authorization did
+  not complete and offer another attempt.
+- `github=error&reason=installation_not_found` or
+  `installation_not_authorized`: ask the user to install/authorize the correct
+  GitHub account.
+- `github=error&reason=already_connected`: show a conflict and do not retry
+  automatically.
 
-After success, invalidate/refetch connection, repository, team, policy, and
-relevant external-access queries.
+Remove these presentation query parameters from browser history after showing
+the result. OAuth codes, raw state, tokens, and provider errors are never sent
+to the frontend.
 
 ### Disconnect
 

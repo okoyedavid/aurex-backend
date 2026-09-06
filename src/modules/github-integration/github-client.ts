@@ -8,6 +8,9 @@ export type GitHubInstallation = {
   suspended_at: string | null;
 };
 
+export type GitHubUser = { id: number; login: string };
+export type GitHubUserInstallation = GitHubInstallation;
+
 export class GitHubApiError extends Error {
   readonly statusCode: number;
   constructor(
@@ -136,10 +139,64 @@ export class GitHubClient {
   }
 }
 
+export class GitHubOAuthClient {
+  constructor(
+    private readonly token: string,
+    private readonly baseUrl: string,
+    private readonly transport: typeof fetch = fetch,
+  ) {}
+
+  private async request<T>(path: string): Promise<T> {
+    let response: Response;
+    try {
+      response = await this.transport(`${this.baseUrl}${path}`, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          Authorization: `Bearer ${this.token}`,
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
+    } catch {
+      throw new GitHubApiError(
+        "github_network_error",
+        "GitHub could not be reached",
+        true,
+      );
+    }
+    if (!response.ok) {
+      throw normalizedError(
+        response.status,
+        "GitHub rejected the user authorization request",
+        response.headers.get("x-ratelimit-remaining") === "0",
+      );
+    }
+    return await response.json() as T;
+  }
+
+  getAuthenticatedUser() {
+    return this.request<GitHubUser>("/user");
+  }
+
+  async listInstallations() {
+    const installations: GitHubUserInstallation[] = [];
+    for (let page = 1; ; page += 1) {
+      const result = await this.request<{
+        installations: GitHubUserInstallation[];
+      }>(`/user/installations?per_page=100&page=${page}`);
+      installations.push(...result.installations);
+      if (result.installations.length < 100) break;
+    }
+    return installations;
+  }
+}
+
 export type GitHubClientLike = Pick<GitHubClient, "getInstallation" | "listRepositories" | "listTeams" | "getUser" | "getTeamMembership" | "putTeamMembership" | "deleteTeamMembership" | "getRepositoryPermission" | "putRepositoryCollaborator" | "deleteRepositoryCollaborator">;
 
-export const createGitHubClientFactory = (configuration = env) => ({
-  isConfigured: () => Boolean(configuration.GITHUB_APP_ID && (configuration.GITHUB_APP_PRIVATE_KEY || configuration.GITHUB_APP_PRIVATE_KEY_B64) && configuration.GITHUB_APP_SLUG),
+export const createGitHubClientFactory = (
+  configuration = env,
+  transport: typeof fetch = fetch,
+) => ({
+  isConfigured: () => Boolean(configuration.GITHUB_APP_ID && (configuration.GITHUB_APP_PRIVATE_KEY || configuration.GITHUB_APP_PRIVATE_KEY_B64) && configuration.GITHUB_APP_SLUG && configuration.GITHUB_APP_CLIENT_ID && configuration.GITHUB_APP_CLIENT_SECRET),
   installUrl: (state: string) => {
     if (!configuration.GITHUB_APP_SLUG) throw new GitHubApiError("github_app_not_configured", "GitHub App is not configured", false);
     return `https://github.com/apps/${encodeURIComponent(configuration.GITHUB_APP_SLUG)}/installations/new?state=${encodeURIComponent(state)}`;
@@ -147,13 +204,58 @@ export const createGitHubClientFactory = (configuration = env) => ({
   forApp: () => {
     const privateKey = configuration.GITHUB_APP_PRIVATE_KEY ?? (configuration.GITHUB_APP_PRIVATE_KEY_B64 ? Buffer.from(configuration.GITHUB_APP_PRIVATE_KEY_B64, "base64").toString("utf8") : null);
     if (!configuration.GITHUB_APP_ID || !privateKey) throw new GitHubApiError("github_app_not_configured", "GitHub App is not configured", false);
-    return new GitHubClient(null, configuration.GITHUB_APP_ID, privateKey, configuration.GITHUB_API_BASE_URL);
+    return new GitHubClient(null, configuration.GITHUB_APP_ID, privateKey, configuration.GITHUB_API_BASE_URL, transport);
   },
   forInstallation: (installationId: number) => {
     const privateKey = configuration.GITHUB_APP_PRIVATE_KEY ?? (configuration.GITHUB_APP_PRIVATE_KEY_B64 ? Buffer.from(configuration.GITHUB_APP_PRIVATE_KEY_B64, "base64").toString("utf8") : null);
     if (!configuration.GITHUB_APP_ID || !privateKey) throw new GitHubApiError("github_app_not_configured", "GitHub App is not configured", false);
-    return new GitHubClient(installationId, configuration.GITHUB_APP_ID, privateKey, configuration.GITHUB_API_BASE_URL);
+    return new GitHubClient(installationId, configuration.GITHUB_APP_ID, privateKey, configuration.GITHUB_API_BASE_URL, transport);
   },
+  exchangeOAuthCode: async (code: string) => {
+    if (!configuration.GITHUB_APP_CLIENT_ID || !configuration.GITHUB_APP_CLIENT_SECRET) {
+      throw new GitHubApiError(
+        "github_app_not_configured",
+        "GitHub App OAuth is not configured",
+        false,
+      );
+    }
+    let response: Response;
+    try {
+      response = await transport("https://github.com/login/oauth/access_token", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          client_id: configuration.GITHUB_APP_CLIENT_ID,
+          client_secret: configuration.GITHUB_APP_CLIENT_SECRET,
+          code,
+        }),
+      });
+    } catch {
+      throw new GitHubApiError(
+        "github_oauth_unavailable",
+        "GitHub authorization could not be completed",
+        true,
+      );
+    }
+    const payload = await response.json().catch(() => ({})) as {
+      access_token?: string;
+      error?: string;
+    };
+    if (!response.ok || !payload.access_token || payload.error) {
+      throw new GitHubApiError(
+        "github_oauth_failed",
+        "GitHub authorization could not be completed",
+        response.status >= 500,
+        response.status,
+      );
+    }
+    return payload.access_token;
+  },
+  forUser: (token: string) =>
+    new GitHubOAuthClient(token, configuration.GITHUB_API_BASE_URL, transport),
 });
 
 export type GitHubClientFactory = ReturnType<typeof createGitHubClientFactory>;

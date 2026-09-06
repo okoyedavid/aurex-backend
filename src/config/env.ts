@@ -58,6 +58,8 @@ const envSchema = z.object({
   POLICY_RECONCILIATION_NIGHTLY_CRON: z.string().min(1).default("0 2 * * *"),
   GITHUB_APP_ID: z.string().trim().min(1).optional(),
   GITHUB_APP_SLUG: z.string().trim().min(1).optional(),
+  GITHUB_APP_CLIENT_ID: z.string().trim().min(1).optional(),
+  GITHUB_APP_CLIENT_SECRET: z.string().min(1).optional(),
   GITHUB_APP_PRIVATE_KEY: z.string().min(1).optional(),
   GITHUB_APP_PRIVATE_KEY_B64: z.string().min(1).optional(),
   GITHUB_API_BASE_URL: z.string().url().default("https://api.github.com"),
