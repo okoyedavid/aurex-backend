@@ -14,7 +14,8 @@ import {
   POLICY_RECONCILIATION_QUEUE,
 } from "./policy-reconciliation.queue.js";
 import type { PolicyReconciliationJob } from "./policy-reconciliation.types.js";
-import { warpDemoProgressService, warpDemoSessionStore } from "../modules/warp-demo/warp-demo.module.js";
+import { processWarpDemoReconciliation } from "./warp-demo-reconciliation.worker.js";
+import { warpDemoProgressService, warpDemoSandboxEngine, warpDemoSessionStore } from "../modules/warp-demo/warp-demo.module.js";
 
 let worker: Worker<PolicyReconciliationJob> | null = null;
 let workerConnection: Redis | null = null;
@@ -39,7 +40,7 @@ const enqueueEmployeesForBusiness = async (
         businessId,
         employeeId: employee.id,
         reason,
-        requestedBy: job.data.requestedBy,
+        requestedBy: "requestedBy" in job.data ? job.data.requestedBy : undefined,
         requestedAt: new Date().toISOString(),
         correlationId: job.data.correlationId,
       });
@@ -60,13 +61,15 @@ const processJob = async (job: Job<PolicyReconciliationJob>) => {
     type: job.data.type,
     businessId: "businessId" in job.data ? job.data.businessId : undefined,
   });
+  if (job.data.type === "RECONCILE_WARP_DEMO") {
+    return (await processWarpDemoReconciliation(job, {
+      sessionStore: warpDemoSessionStore,
+      progressService: warpDemoProgressService,
+      sandboxEngine: warpDemoSandboxEngine,
+    }))!;
+  }
   if (job.data.type === "RECONCILE_EMPLOYEE") {
-    const demoRun = job.data.demoRun;
-    if (demoRun) {
-      await warpDemoProgressService.markRunning(demoRun.runId);
-      await warpDemoProgressService.appendEvent(demoRun.runId, { stage: "policy_resolution", status: "running", title: "Policies recalculating", description: "Aurex is evaluating the employee against the seeded policy rules." }, "policy-running");
-    }
-    const policyResult = await policyReconciliationService.reconcileEmployeePolicies({
+    await policyReconciliationService.reconcileEmployeePolicies({
       businessId: job.data.businessId,
       employeeId: job.data.employeeId,
       asOfDate: new Date(),
@@ -75,30 +78,11 @@ const processJob = async (job: Job<PolicyReconciliationJob>) => {
       correlationId: job.data.correlationId,
       triggeredByUserId: job.data.requestedBy,
     });
-    if (demoRun) {
-      const evaluated = policyResult.resolution.evaluatedRules.length;
-      await warpDemoProgressService.appendEvent(demoRun.runId, { stage: "policy_resolution", status: "success", title: "Policies recalculated", description: `${evaluated} active ${evaluated === 1 ? "rule was" : "rules were"} evaluated for this employee.` }, "policy-complete");
-      const created = policyResult.changes.filter((change) => change.operation === "CREATE" || change.operation === "UPDATE_VERSION").length;
-      const ended = policyResult.changes.filter((change) => change.operation === "END" || change.operation === "UPDATE_VERSION").length;
-      const kept = policyResult.changes.filter((change) => change.operation === "KEEP").length;
-      await warpDemoProgressService.appendEvent(demoRun.runId, { stage: "assignment_reconciliation", status: "success", title: "Policy assignments reconciled", description: `${created} ${created === 1 ? "assignment" : "assignments"} became effective, ${ended} ended, and ${kept} remained unchanged.` }, "assignments-complete");
-    }
     const grants =
       await externalAccessReconciliationService.syncEmployeeDesiredAccess(
         job.data.businessId,
         job.data.employeeId,
       );
-    if (demoRun) {
-      const warning = grants.length > 0;
-      await warpDemoProgressService.appendEvent(demoRun.runId, { stage: "external_access", status: warning ? "warning" : "success", title: "External access synchronized", description: warning ? `${grants.length} desired external access ${grants.length === 1 ? "record was" : "records were"} synchronized. Privileged GitHub execution is disabled for the public demo.` : "No external access changes were required. No privileged GitHub actions were executed." }, "external-complete");
-      const assignmentsChanged = policyResult.changes.some((change) => change.operation !== "KEEP");
-      const auditChanged = demoRun.employeeChanged || assignmentsChanged;
-      await warpDemoProgressService.appendEvent(demoRun.runId, { stage: "audit", status: "success", title: auditChanged ? "Audit evidence recorded" : "Audit state checked", description: auditChanged ? "The employee and assignment changes were recorded through Aurex's normal audit paths." : "No employee or assignment change required a new audit record." }, "audit-complete");
-      await warpDemoProgressService.appendEvent(demoRun.runId, { stage: "complete", status: warning ? "warning" : "success", title: "Reconciliation complete", description: "The persisted employee and policy assignment state is ready to refresh." }, "run-complete");
-      await warpDemoProgressService.markCompleted(demoRun.runId, [...(demoRun.employeeChanged ? ["employee"] : []), ...(assignmentsChanged ? ["assignments"] : []), ...(auditChanged ? ["audit"] : []), ...(grants.length ? ["externalAccess"] : [])], warning);
-      await warpDemoSessionStore.finishRun(demoRun.sessionId, demoRun.runId);
-      return { employeesProcessed: 1, demoRunId: demoRun.runId };
-    }
     for (const grant of grants)
       await enqueuePolicyReconciliation({
         type: "ENFORCE_EXTERNAL_ACCESS",
@@ -268,12 +252,15 @@ export const startPolicyReconciliationWorker = () => {
       attemptsMade: job?.attemptsMade,
       error: error.message,
       });
-      const demoRun = job?.data.demoRun;
+      const demoRun = job?.data.type === "RECONCILE_WARP_DEMO" ? job.data : null;
       const attempts = job?.opts.attempts ?? 1;
       if (demoRun && (job?.attemptsMade ?? 0) >= attempts) {
-        void warpDemoProgressService.appendEvent(demoRun.runId, { stage: "complete", status: "failed", title: "Reconciliation could not be completed", description: "Reset the demo scenario and try again." }, "run-failed")
-          .then(() => warpDemoProgressService.markFailed(demoRun.runId))
-          .then(() => warpDemoSessionStore.finishRun(demoRun.sessionId, demoRun.runId))
+        void warpDemoSessionStore.getSession(demoRun.sessionId)
+          .then((sandbox) => sandbox.revision === demoRun.revision && sandbox.activeRunId === demoRun.runId
+            ? warpDemoProgressService.appendEvent(demoRun.runId, { stage: "complete", status: "failed", title: "Reconciliation could not be completed", description: "Reset the demo scenario and try again." }, "run-failed")
+              .then(() => warpDemoProgressService.markFailed(demoRun.runId))
+              .then(() => warpDemoSessionStore.finishRun(demoRun.sessionId, demoRun.runId))
+            : undefined)
           .catch((progressError) => console.error("Failed to record terminal Warp demo progress", { runId: demoRun.runId, error: progressError instanceof Error ? progressError.message : "unknown" }));
       }
     },

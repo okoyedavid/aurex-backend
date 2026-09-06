@@ -18,6 +18,10 @@ export const createWarpDemoRouter = (
   router.post("/session/:sessionId/mutations", mutationLimiter, validate(schemas.mutationRequest), controller.mutate);
   router.post("/session/:sessionId/reset", mutationLimiter, validate(schemas.resetRequest), controller.reset);
   router.get("/session/:sessionId/reconciliation/:runId", validate(schemas.reconciliationRunRequest), controller.reconciliationRun);
+  router.get("/session/:sessionId/employee", validate(schemas.sessionRequest), controller.sessionEmployee);
+  router.get("/session/:sessionId/employee/policies", validate(schemas.sessionRequest), controller.sessionEmployeePolicies);
+  router.get("/session/:sessionId/employee/explain", validate(schemas.sessionRequest), controller.sessionExplain);
+  router.get("/session/:sessionId/audit", validate(schemas.sessionRequest), controller.sessionAudit);
   router.get("/overview", validate(schemas.emptyRequest), controller.overview);
   router.get("/employees", validate(schemas.emptyRequest), controller.employees);
   router.get("/employees/:employeeId", validate(schemas.employeeRequest), controller.employee);

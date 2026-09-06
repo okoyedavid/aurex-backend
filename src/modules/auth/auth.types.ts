@@ -11,10 +11,18 @@ import { WithTransaction } from "../../utils/mongooose-transactions.js";
 import { VerificationService } from "../verification/verification.service.js";
 import { HttpError } from "../../utils/api-error.js";
 import { AuditEventService } from "../audit-event/audit-event.service.js";
+import { GoogleOAuthService } from "./google-oauth.service.js";
 
 export type LoginInput = {
   email: string;
   password: string;
+  requestMetadata: RequestMetadata;
+  location: LocationMetadata;
+};
+
+export type GoogleLoginInput = {
+  code: string;
+  nonce: string;
   requestMetadata: RequestMetadata;
   location: LocationMetadata;
 };
@@ -55,6 +63,7 @@ export type AuthServiceDependencies = {
   hashService: HashService;
   verificationService: VerificationService;
   auditEventService: AuditEventService;
+  googleOAuthService: GoogleOAuthService;
   withTransaction: WithTransaction;
   createHttpError: (message: string, statusCode: number) => HttpError;
   //   authProviderRepository: AuthProviderRepository;

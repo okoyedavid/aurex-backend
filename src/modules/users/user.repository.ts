@@ -9,6 +9,8 @@ const findUserByIdWithPassword = (userId: string) =>
 
 const findUserByEmail = (email: string) => User.findOne({ email });
 
+const findUserByGoogleId = (googleId: string) => User.findOne({ googleId });
+
 const findUserByUsername = (username: string) => User.findOne({ username });
 
 const createUser = (payload: CreateUserPayload) => User.create(payload);
@@ -38,6 +40,7 @@ export const userRepository = {
   createUser,
   deleteUserById,
   findUserByEmail,
+  findUserByGoogleId,
   findUserById,
   updateUserById,
   findUserByIdWithPassword,

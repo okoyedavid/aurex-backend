@@ -1,6 +1,9 @@
-import type { Response } from "express";
+import crypto from "node:crypto";
+import type { Request, Response } from "express";
+import { env } from "../../config/env.js";
 import type { ApiError } from "../../utils/api-error.js";
 import { asyncHandler } from "../../utils/async-handler.js";
+import { clearOAuthStateCookie, setOAuthStateCookie } from "../../utils/cookie.js";
 import type { AuditEventService } from "../audit-event/audit-event.service.js";
 import type { ErrorService } from "../error/error.service.js";
 import type { AuthService } from "./auth.service.js";
@@ -11,7 +14,9 @@ import {
   resetPasswordSchema,
   resendEmailSchema,
   verifyEmailSchema,
+  googleCallbackSchema,
 } from "./auth.validators.js";
+import type { GoogleOAuthService } from "./google-oauth.service.js";
 
 type GetRequestContext =
   typeof import("../../services/ip-location.service.js").getRequestContext;
@@ -33,6 +38,7 @@ type AuthControllerDependencies = {
   createApiError: (statusCode: number, message: string) => ApiError;
   getErrorStatusCode: (error: unknown) => number;
   getErrorMessage: (error: unknown) => string;
+  googleOAuthService: GoogleOAuthService;
 };
 
 const createAuthController = ({
@@ -45,7 +51,96 @@ const createAuthController = ({
   createApiError,
   getErrorStatusCode,
   getErrorMessage,
+  googleOAuthService,
 }: AuthControllerDependencies) => {
+  type GoogleLoginResult =
+    | "success"
+    | "error"
+    | "account_conflict"
+    | "account_inactive";
+
+  const redirectToClient = (res: Response, result: GoogleLoginResult) => {
+    const url = new URL(env.CLIENT_URL);
+    url.searchParams.set("google", result);
+    return res.redirect(url.toString());
+  };
+
+  const google = asyncHandler(async (_req, res) => {
+    const state = googleOAuthService.createState();
+    setOAuthStateCookie(res, "google", state);
+    return res.redirect(googleOAuthService.getAuthorizationUrl(state));
+  });
+
+  const googleCallback = asyncHandler(async (req: Request, res: Response) => {
+    const { code, state, error } = googleCallbackSchema.shape.query.parse(req.validatedQuery);
+    const storedState = req.cookies?.googleOAuthState;
+    clearOAuthStateCookie(res, "google");
+
+    if (error) return redirectToClient(res, "error");
+    if (!code || !state || !storedState) {
+      throw createApiError(400, "Invalid Google login state");
+    }
+
+    const expected = Buffer.from(storedState);
+    const received = Buffer.from(state);
+    if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+      throw createApiError(400, "Invalid Google login state");
+    }
+
+    const { requestMetadata, location } = await getRequestContext(req);
+    try {
+      const result = await authService.loginWithGoogle({
+        code,
+        nonce: state,
+        requestMetadata,
+        location,
+      });
+      setAuthCookies(res, { accessToken: result.accessToken, refreshToken: result.refreshToken });
+      await auditEventService.recordEventSafely({
+        eventType: "auth.login.succeeded",
+        category: "authentication",
+        outcome: "success",
+        userId: result.user.id,
+        email: result.email,
+        userSessionId: result.userSession?.userSessionId,
+        authSessionId: result.userSession?.currentAuthSessionId,
+        requestMetadata,
+        location,
+        metadata: { provider: "google" },
+        notification: {
+          title: "New login detected",
+          message: `A Google login was detected from ${requestMetadata.deviceName ?? "an unknown device"}.`,
+        },
+      });
+      return redirectToClient(res, "success");
+    } catch (caught) {
+      await auditEventService.recordEventSafely({
+        eventType: "auth.login.failed",
+        category: "authentication",
+        outcome: "failure",
+        severity: "warning",
+        userId: null,
+        email: null,
+        requestMetadata,
+        location,
+        reason: "login_failed",
+        metadata: { provider: "google" },
+      });
+      const statusCode =
+        typeof caught === "object" && caught !== null && "statusCode" in caught
+          ? Number(caught.statusCode)
+          : null;
+      return redirectToClient(
+        res,
+        statusCode === 409
+          ? "account_conflict"
+          : statusCode === 403
+            ? "account_inactive"
+            : "error",
+      );
+    }
+  });
+
   const login = asyncHandler(async (req, res) => {
     const { requestMetadata, location } = await getRequestContext(req);
 
@@ -222,6 +317,8 @@ const createAuthController = ({
 
   return {
     login,
+    google,
+    googleCallback,
     register,
     getMe,
     forgotPassword,

@@ -9,6 +9,7 @@ export default defineConfig({
       "src/modules/employee/**/*.test.ts",
       "src/modules/audit-feed/**/*.test.ts",
       "src/modules/github-integration/**/*.test.ts",
+      "src/modules/auth/**/*.test.ts",
       "src/queues/**/*.test.ts",
     ],
     exclude: ["**/*.route.test.ts"],
