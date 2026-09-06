@@ -45,8 +45,14 @@ export const policyReconciliationJobId = (job: PolicyReconciliationJob) => {
   if (job.type === "RECONCILE_POLICY") return `policy-${job.businessId}-${job.policyId}-v${job.policyVersion}`;
   if (job.type === "RECONCILE_CATEGORY") return `category-${job.businessId}-${job.categoryId}`;
   if (job.type === "RECONCILE_BUSINESS") return `business-${job.businessId}`;
+  if (job.type === "RECONCILE_EXTERNAL_EMPLOYEE") return `github-employee-${job.businessId}-${job.employeeId}-${job.requestedAt.replace(/[^0-9]/g, "")}`;
+  if (job.type === "ENFORCE_EXTERNAL_ACCESS") return `github-access-${job.businessId}-${job.grantId}-${job.desiredRevision}`;
+  if (job.type === "RECONCILE_EXTERNAL_DRIFT") return `github-drift-${job.businessId}-${job.requestedAt.slice(0, 10)}`;
   return "nightly-policy-reconciliation";
 };
+
+export const enqueueEmployeeExternalReconciliation = (businessId: string, employeeId: string, reason: string, requestedBy?: string) =>
+  enqueuePolicyReconciliation({ type: "RECONCILE_EXTERNAL_EMPLOYEE", businessId, employeeId, reason, requestedBy, requestedAt: new Date().toISOString() });
 
 export const enqueuePolicyReconciliation = async (job: PolicyReconciliationJob) => {
   const policyQueue = getPolicyQueue();

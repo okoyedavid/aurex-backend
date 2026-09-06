@@ -56,6 +56,13 @@ const envSchema = z.object({
   POLICY_RECONCILIATION_CONCURRENCY: z.coerce.number().int().min(1).max(50).default(3),
   POLICY_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(10).max(1000).default(100),
   POLICY_RECONCILIATION_NIGHTLY_CRON: z.string().min(1).default("0 2 * * *"),
+  GITHUB_APP_ID: z.string().trim().min(1).optional(),
+  GITHUB_APP_SLUG: z.string().trim().min(1).optional(),
+  GITHUB_APP_CLIENT_ID: z.string().trim().min(1).optional(),
+  GITHUB_APP_CLIENT_SECRET: z.string().min(1).optional(),
+  GITHUB_APP_PRIVATE_KEY: z.string().min(1).optional(),
+  GITHUB_APP_PRIVATE_KEY_B64: z.string().min(1).optional(),
+  GITHUB_API_BASE_URL: z.string().url().default("https://api.github.com"),
 });
 
 export const env = envSchema.parse(process.env);

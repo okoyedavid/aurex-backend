@@ -41,6 +41,8 @@ export const allowedPermissions = [
   "policies:assign",
   "policies:view_audit",
   "policies:reconcile",
+  "integrations:view",
+  "integrations:manage",
 ] as const;
 
 export type Permission = (typeof allowedPermissions)[number];
@@ -69,6 +71,8 @@ export const systemRolePermissions = {
     "employees:update",
     "employees:archive",
     "employees:verify",
+    "integrations:view",
+    "integrations:manage",
   ],
   finance_manager: [
     "payments:create",

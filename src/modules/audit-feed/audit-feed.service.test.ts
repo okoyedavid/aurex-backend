@@ -7,6 +7,7 @@ const userId = "68b000000000000000000002";
 const memberId = "68b000000000000000000003";
 const employeeId = "68b000000000000000000004";
 const policyId = "68b000000000000000000005";
+const categoryId = "68b000000000000000000006";
 
 const general = (overrides: Record<string, unknown> = {}) => ({
   id: "general-1",
@@ -23,8 +24,13 @@ const policy = (overrides: Record<string, unknown> = {}) => ({
   id: "policy-audit-1",
   action: "ASSIGNMENT_CREATED",
   actorType: "worker",
-  employeeId,
-  policyId: { id: policyId, name: "Remote Work" },
+  actorSnapshot: { id: null, type: "worker", displayName: "Aurex policy engine" },
+  employeeId: { id: employeeId, fullName: "Current Employee Name" },
+  employeeSnapshot: { id: employeeId, displayName: "Maya Employee" },
+  policyId: { id: policyId, name: "Renamed Policy", description: "Current description", version: 3 },
+  policySnapshot: { id: policyId, displayName: "Remote Work", description: "Original description", version: 1 },
+  categoryId: { id: categoryId, name: "Renamed Category", description: "Current category", cardinality: "ONE" },
+  categorySnapshot: { id: categoryId, displayName: "Work Location", description: "Original category", cardinality: "MANY" },
   occurredAt: new Date("2026-01-03"),
   metadata: { token: "secret" },
   before: { configuration: { secret: true } },
@@ -176,11 +182,23 @@ describe("safe audit DTO", () => {
   it("sanitizes personal policy effects", () => {
     const dto = mapPolicyAuditEvent(policy(), true);
     expect(dto.summary).toBe("Remote Work was assigned to you.");
+    expect(dto.policy).toEqual({ id: policyId, version: 1, displayName: "Remote Work", description: "Original description" });
+    expect(dto.category).toEqual({ id: categoryId, displayName: "Work Location", description: "Original category", cardinality: "MANY" });
+    expect(dto.historicalSnapshotAvailable).toBe(true);
     expect(JSON.stringify(dto)).not.toMatch(/configuration|secret|metadata|token/);
   });
 
   it("does not expose policy configuration changes in an administrative DTO", () => {
     const dto = mapPolicyAuditEvent(policy(), false);
+    expect(dto.subject).toEqual({ type: "employee", id: employeeId, displayName: "Maya Employee" });
+    expect(dto.summary).toBe("Remote Work was assigned to Maya Employee.");
     expect(JSON.stringify(dto)).not.toMatch(/configuration|secret|metadata|token/);
+  });
+
+  it("marks legacy live-name fallbacks as historically unreliable", () => {
+    const dto = mapPolicyAuditEvent(policy({ policySnapshot: undefined, categorySnapshot: undefined, employeeSnapshot: undefined }), false);
+    expect(dto.policy?.displayName).toBe("Renamed Policy");
+    expect(dto.category?.displayName).toBe("Renamed Category");
+    expect(dto.historicalSnapshotAvailable).toBe(false);
   });
 });

@@ -11,6 +11,43 @@ export const policyAuditEntityTypes = [
 
 export const policyAuditActorTypes = ["user", "system", "worker"] as const;
 
+const actorSnapshotSchema = new mongoose.Schema(
+  {
+    id: { type: String, default: null },
+    type: { type: String, enum: policyAuditActorTypes, required: true },
+    displayName: { type: String, required: true, trim: true },
+  },
+  { _id: false, versionKey: false },
+);
+
+const employeeSnapshotSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true },
+    displayName: { type: String, required: true, trim: true },
+  },
+  { _id: false, versionKey: false },
+);
+
+const policySnapshotSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true },
+    version: { type: Number, required: true, min: 1 },
+    displayName: { type: String, required: true, trim: true },
+    description: { type: String, default: null },
+  },
+  { _id: false, versionKey: false },
+);
+
+const categorySnapshotSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true },
+    displayName: { type: String, required: true, trim: true },
+    description: { type: String, default: null },
+    cardinality: { type: String, enum: ["ONE", "MANY"], required: true },
+  },
+  { _id: false, versionKey: false },
+);
+
 const policyAuditSchema = new mongoose.Schema(
   {
     businessId: {
@@ -72,6 +109,26 @@ const policyAuditSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "PolicyCategory",
       default: null,
+      immutable: true,
+    },
+    actorSnapshot: {
+      type: actorSnapshotSchema,
+      default: undefined,
+      immutable: true,
+    },
+    employeeSnapshot: {
+      type: employeeSnapshotSchema,
+      default: undefined,
+      immutable: true,
+    },
+    policySnapshot: {
+      type: policySnapshotSchema,
+      default: undefined,
+      immutable: true,
+    },
+    categorySnapshot: {
+      type: categorySnapshotSchema,
+      default: undefined,
       immutable: true,
     },
     before: { type: mongoose.Schema.Types.Mixed, default: undefined, immutable: true },

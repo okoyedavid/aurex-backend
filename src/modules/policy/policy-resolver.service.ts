@@ -100,6 +100,7 @@ export const createPolicyResolver = ({
       employeeTypeId: activeEmployeeType ? employeeTypeId : null,
       groupIds: activeGroups.map((group) => group.id),
       state: employee.state ?? null,
+      status: employee.status,
       employmentStartDate: employee.employmentStartDate ?? null,
     };
 

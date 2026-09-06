@@ -6,6 +6,34 @@ const businessParams = z.object({ businessId: objectId }).strict();
 const pagination = z.object({ page: z.coerce.number().int().min(1).default(1), limit: z.coerce.number().int().min(1).max(100).default(20) });
 const nullableDate = z.coerce.date().nullable().optional();
 const effectiveDates = { effectiveFrom: nullableDate, effectiveTo: nullableDate };
+const githubConfiguration = z.discriminatedUnion("resourceType", [
+  z.object({
+    provider: z.literal("github"),
+    resourceType: z.literal("team"),
+    organizationId: z.number().int().positive(),
+    organizationLogin: z.string().trim().min(1).max(100),
+    teamId: z.number().int().positive(),
+    teamSlug: z.string().trim().min(1).max(100),
+    role: z.literal("member"),
+  }).strict(),
+  z.object({
+    provider: z.literal("github"),
+    resourceType: z.literal("repository"),
+    repositoryId: z.number().int().positive(),
+    owner: z.string().trim().min(1).max(100),
+    repo: z.string().trim().min(1).max(100),
+    permission: z.enum(["pull", "triage", "push", "maintain", "admin"]),
+  }).strict(),
+]);
+const policyConfiguration = z.record(z.string(), z.unknown()).superRefine((value, context) => {
+  if (value.provider !== "github") return;
+  const parsed = githubConfiguration.safeParse(value);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues) {
+      context.addIssue({ code: "custom", message: issue.message, path: issue.path });
+    }
+  }
+});
 const validDateRange = <T extends z.ZodRawShape>(schema: z.ZodObject<T>) => schema.refine((raw) => {
   const value = raw as { effectiveFrom?: Date | null; effectiveTo?: Date | null };
   return !value.effectiveFrom || !value.effectiveTo || value.effectiveFrom < value.effectiveTo;
@@ -18,6 +46,7 @@ const conditionSchema = z.discriminatedUnion("field", [
   z.object({ field: z.literal("employeeType"), operator: z.enum(["equals", "not_equals", "in", "not_in"]), value: referenceValue }).strict(),
   z.object({ field: z.literal("group"), operator: z.enum(["contains", "not_contains", "in", "not_in"]), value: referenceValue }).strict(),
   z.object({ field: z.literal("state"), operator: z.enum(["equals", "not_equals", "in", "not_in"]), value: stateValue }).strict(),
+  z.object({ field: z.literal("status"), operator: z.enum(["equals", "not_equals", "in", "not_in"]), value: z.union([z.enum(["active", "suspended", "on leave", "archived"]), z.array(z.enum(["active", "suspended", "on leave", "archived"])).min(1)]) }).strict(),
   z.object({ field: z.literal("tenure"), operator: z.enum(["equals", "not_equals", "gte", "lte", "gt", "lt"]), value: z.number().nonnegative() }).strict(),
 ]);
 
@@ -28,8 +57,8 @@ export const updateCategorySchema = z.object({ body: z.object({ name: z.string()
 
 export const listPoliciesSchema = z.object({ body: empty.optional(), params: businessParams, query: pagination.extend({ categoryId: objectId.optional(), status: z.enum(["draft", "active", "archived"]).optional() }).strict() });
 export const policyParamsSchema = z.object({ body: empty.optional(), params: businessParams.extend({ policyId: objectId }), query: empty });
-export const createPolicySchema = z.object({ body: validDateRange(z.object({ categoryId: objectId, name: z.string().trim().min(2).max(120), description: z.string().trim().max(2000).nullable().optional(), configuration: z.record(z.string(), z.unknown()).optional(), ...effectiveDates }).strict()), params: businessParams, query: empty });
-export const updatePolicySchema = z.object({ body: validDateRange(z.object({ categoryId: objectId.optional(), name: z.string().trim().min(2).max(120).optional(), description: z.string().trim().max(2000).nullable().optional(), configuration: z.record(z.string(), z.unknown()).optional(), ...effectiveDates }).strict()).refine((body) => Object.keys(body).length > 0, "At least one field is required"), params: businessParams.extend({ policyId: objectId }), query: empty });
+export const createPolicySchema = z.object({ body: validDateRange(z.object({ categoryId: objectId, name: z.string().trim().min(2).max(120), description: z.string().trim().max(2000).nullable().optional(), configuration: policyConfiguration.optional(), ...effectiveDates }).strict()), params: businessParams, query: empty });
+export const updatePolicySchema = z.object({ body: validDateRange(z.object({ categoryId: objectId.optional(), name: z.string().trim().min(2).max(120).optional(), description: z.string().trim().max(2000).nullable().optional(), configuration: policyConfiguration.optional(), ...effectiveDates }).strict()).refine((body) => Object.keys(body).length > 0, "At least one field is required"), params: businessParams.extend({ policyId: objectId }), query: empty });
 
 export const listRulesSchema = z.object({ body: empty.optional(), params: businessParams.extend({ policyId: objectId }), query: empty });
 export const ruleParamsSchema = z.object({ body: empty.optional(), params: businessParams.extend({ ruleId: objectId }), query: empty });

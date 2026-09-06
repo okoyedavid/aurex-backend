@@ -22,4 +22,10 @@ describe("policy reconciliation job identity", () => {
     const job = { ...base, type: "RECONCILE_EMPLOYEE" as const, employeeId: "e1" };
     expect(policyReconciliationJobId(job)).not.toBe(policyReconciliationJobId({ ...job, requestedAt: "2026-08-31T10:00:00.001Z" }));
   });
+
+  it("coalesces duplicate external enforcement for the same desired revision", () => {
+    const job = { ...base, type: "ENFORCE_EXTERNAL_ACCESS" as const, grantId: "g1", desiredRevision: 4 };
+    expect(policyReconciliationJobId(job)).toBe(policyReconciliationJobId({ ...job, requestedAt: "2026-08-31T10:05:00.000Z" }));
+    expect(policyReconciliationJobId(job)).not.toBe(policyReconciliationJobId({ ...job, desiredRevision: 5 }));
+  });
 });

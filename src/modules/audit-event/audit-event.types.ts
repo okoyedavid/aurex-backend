@@ -42,7 +42,17 @@ export type RecordSecurityEvent = {
     | "business.employee_type.created"
     | "business.employee_type.updated"
     | "business.employee_group.created"
-    | "business.employee_group.updated";
+    | "business.employee_group.updated"
+    | "github.connection.connected"
+    | "github.connection.disconnected"
+    | "github.identity.updated"
+    | "github.identity.removed"
+    | "github.access.granted"
+    | "github.access.revoked"
+    | "github.access.pending_acceptance"
+    | "github.access.retained_external"
+    | "github.access.blocked"
+    | "github.access.failed";
 
   category:
     | "security"
@@ -70,16 +80,8 @@ export type RecordSecurityEvent = {
     | "invalid_or_expired_verification_code"
     | "user_not_found"
     | null;
-  metadata?: {
-    method?: string;
-    path?: string;
-    revokedCount?: string | number;
-    businessId?: string;
-    inviteId?: string;
-    roleId?: string;
-    memberId?: string;
-    status?: string;
-  };
+  summary?: string | null;
+  metadata?: Record<string, unknown>;
   requestMetadata?: Partial<RequestMetadata>;
   location?: Partial<LocationMetadata>;
   notification?: {

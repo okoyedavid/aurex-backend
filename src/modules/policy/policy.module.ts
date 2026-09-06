@@ -12,9 +12,10 @@ import { createPolicyReconciliationService } from "./policy-reconciliation.servi
 import { policyRepository } from "./policy.repository.js";
 import { createPolicyResolver } from "./policy-resolver.service.js";
 import { createPolicyService } from "./policy.service.js";
+import { githubConnectionService } from "../github-integration/github-integration.module.js";
 
 export const policyAuditService = createPolicyAuditService(policyAuditRepository);
 export const policyResolver = createPolicyResolver({ employeeRepository, policyRepository, employeeListRepository, employeeTypeRepository, employeeGroupRepository, createHttpError });
 export const policyReconciliationService = createPolicyReconciliationService({ repository: policyRepository, employeeRepository, resolver: policyResolver, auditService: policyAuditService, withTransaction, createHttpError });
-export const policyService = createPolicyService({ repository: policyRepository, auditService: policyAuditService, businessMemberRepository, employeeListRepository, employeeTypeRepository, employeeGroupRepository, withTransaction, createHttpError });
+export const policyService = createPolicyService({ repository: policyRepository, auditService: policyAuditService, businessMemberRepository, employeeListRepository, employeeTypeRepository, employeeGroupRepository, withTransaction, createHttpError, validateExternalTarget: githubConnectionService.validateTarget });
 export const policyController = createPolicyController({ policyService, resolver: policyResolver, reconciliationService: policyReconciliationService, auditService: policyAuditService });

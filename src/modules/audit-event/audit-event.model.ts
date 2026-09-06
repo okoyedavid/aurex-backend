@@ -85,6 +85,7 @@ const auditEventSchema = new mongoose.Schema(
     region: { type: String, default: null },
     country: { type: String, default: null },
     reason: { type: String, default: null },
+    summary: { type: String, default: null },
     changes: {
       fields: { type: [String], default: undefined },
       before: { type: mongoose.Schema.Types.Mixed, default: undefined },
@@ -150,6 +151,7 @@ export type CreateAuditEventPayload = {
   country?: string | null;
 
   reason?: string | null;
+  summary?: string | null;
 
   changes?: {
     fields?: string[];

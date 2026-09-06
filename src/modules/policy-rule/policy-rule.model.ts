@@ -3,6 +3,7 @@ import mongoose, { type InferSchemaType, type Types } from "mongoose";
 export type PolicyRuleField =
   | "department"
   | "state"
+  | "status"
   | "tenure"
   | "employeeType"
   | "group";
@@ -38,7 +39,7 @@ const policyRuleConditionSchema = new mongoose.Schema<PolicyRuleCondition>(
   {
     field: {
       type: String,
-      enum: ["department", "state", "tenure", "employeeType", "group"],
+      enum: ["department", "state", "status", "tenure", "employeeType", "group"],
       required: true,
     },
     operator: {
