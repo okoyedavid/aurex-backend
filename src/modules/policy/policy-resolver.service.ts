@@ -92,10 +92,17 @@ export const createPolicyResolver = ({
     const employeeListId = id(employee.employeeListId);
     const employeeTypeId = employee.employeeTypeId ? id(employee.employeeTypeId) : null;
     const employeeGroupIds = (employee.groupIds ?? []).map(id);
-    const [activeDepartment, activeEmployeeType, activeGroups] = await Promise.all([
+    const referenced = (field: string) => [...new Set(rules.flatMap((rule) => rule.conditions.filter((condition) => condition.field === field).flatMap((condition) => Array.isArray(condition.value) ? condition.value.map(id) : [id(condition.value)])))];
+    const departmentIds = [...new Set([employeeListId, ...referenced("department")])];
+    const employeeTypeIds = [...new Set([...(employeeTypeId ? [employeeTypeId] : []), ...referenced("employeeType")])];
+    const groupIds = [...new Set([...employeeGroupIds, ...referenced("group")])];
+    const [activeDepartment, activeEmployeeType, activeGroups, departments, employeeTypes, groups] = await Promise.all([
       employeeListRepository.findEmployeeListByBusinessAndId(businessId, employeeListId),
       employeeTypeId ? employeeTypeRepository.findActiveByBusinessAndId(businessId, employeeTypeId) : null,
       employeeGroupRepository.findActiveByBusinessAndIds(businessId, employeeGroupIds),
+      typeof employeeListRepository.findEmployeeListsByBusinessAndIds === "function" ? employeeListRepository.findEmployeeListsByBusinessAndIds(businessId, departmentIds) : Promise.resolve([]),
+      typeof employeeTypeRepository.findByBusinessAndIds === "function" ? employeeTypeRepository.findByBusinessAndIds(businessId, employeeTypeIds) : Promise.resolve([]),
+      typeof employeeGroupRepository.findByBusinessAndIds === "function" ? employeeGroupRepository.findByBusinessAndIds(businessId, groupIds) : Promise.resolve([]),
     ]);
 
     const context = {
@@ -108,11 +115,13 @@ export const createPolicyResolver = ({
       employmentStartDate: employee.employmentStartDate ?? null,
     };
 
-    const groupNames = new Map(activeGroups.map((group) => [group.id, group.name]));
+    const departmentNames = new Map([...departments.map((item) => [item.id, item.name] as const), ...(activeDepartment ? [[employeeListId, activeDepartment.name] as const] : [])]);
+    const employeeTypeNames = new Map([...employeeTypes.map((item) => [item.id, item.name] as const), ...(activeEmployeeType && employeeTypeId ? [[employeeTypeId, activeEmployeeType.name] as const] : [])]);
+    const groupNames = new Map([...groups.map((group) => [group.id, group.name] as const), ...activeGroups.map((group) => [group.id, group.name] as const)]);
     const referenceName = (field: string, referenceId: string) => {
-      if (field === "department") return activeDepartment?.name ?? "Unknown department";
-      if (field === "employeeType") return activeEmployeeType?.name ?? "Unknown employee type";
-      if (field === "group") return groupNames.get(referenceId) ?? "Unknown group";
+      if (field === "department") return departmentNames.get(referenceId) ?? "Department unavailable.";
+      if (field === "employeeType") return employeeTypeNames.get(referenceId) ?? "Employee type unavailable.";
+      if (field === "group") return groupNames.get(referenceId) ?? "Group unavailable.";
       return referenceId;
     };
     const displayValue = (field: string, value: unknown): DisplayValue => {
@@ -217,8 +226,11 @@ export const createPolicyResolver = ({
     });
 
     for (const candidate of automaticByPolicy.values()) {
-      candidate.matchedRuleIds.sort((a, b) => a.localeCompare(b));
-      candidate.matchedRuleNames.sort((a, b) => a.localeCompare(b));
+      const matchedRules = candidate.matchedRuleIds
+        .map((ruleId, index) => ({ ruleId, ruleName: candidate.matchedRuleNames[index]! }))
+        .sort((a, b) => a.ruleId.localeCompare(b.ruleId));
+      candidate.matchedRuleIds = matchedRules.map(({ ruleId }) => ruleId);
+      candidate.matchedRuleNames = matchedRules.map(({ ruleName }) => ruleName);
     }
 
     const allByCategory = new Map<string, { manual: ResolvedPolicy[]; automatic: ResolvedPolicy[] }>();

@@ -23,6 +23,11 @@ describe("policy reconciliation job identity", () => {
     expect(policyReconciliationJobId(job)).not.toBe(policyReconciliationJobId({ ...job, requestedAt: "2026-08-31T10:00:00.001Z" }));
   });
 
+  it("never coalesces runs from different demo sessions", () => {
+    const job = { type: "RECONCILE_WARP_DEMO" as const, sessionId: "session-a", runId: "run", revision: 2, employeeChanged: true, reason: "demo", requestedAt: base.requestedAt, correlationId: "run" };
+    expect(policyReconciliationJobId(job)).not.toBe(policyReconciliationJobId({ ...job, sessionId: "session-b" }));
+  });
+
   it("coalesces duplicate external enforcement for the same desired revision", () => {
     const job = { ...base, type: "ENFORCE_EXTERNAL_ACCESS" as const, grantId: "g1", desiredRevision: 4 };
     expect(policyReconciliationJobId(job)).toBe(policyReconciliationJobId({ ...job, requestedAt: "2026-08-31T10:05:00.000Z" }));

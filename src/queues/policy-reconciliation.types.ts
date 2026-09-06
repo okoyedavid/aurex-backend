@@ -4,15 +4,10 @@ export type PolicyJobContext = {
   requestedBy?: string;
   requestedAt: string;
   correlationId?: string;
-  demoRun?: {
-    runId: string;
-    sessionId: string;
-    employeeChanged: boolean;
-    suppressExternalExecution: true;
-  };
 };
 
 export type PolicyReconciliationJob =
+  | { type: "RECONCILE_WARP_DEMO"; sessionId: string; runId: string; revision: number; employeeChanged: boolean; reason: string; requestedAt: string; correlationId: string }
   | ({ type: "RECONCILE_EMPLOYEE"; employeeId: string } & PolicyJobContext)
   | ({
       type: "RECONCILE_POLICY";

@@ -44,6 +44,7 @@ export const getPolicyQueue = () => {
 };
 
 export const policyReconciliationJobId = (job: PolicyReconciliationJob) => {
+  if (job.type === "RECONCILE_WARP_DEMO") return `demo-${job.sessionId}-${job.revision}-${job.runId}`;
   if (job.type === "RECONCILE_EMPLOYEE") {
     const requestVersion = job.requestedAt.replace(/[^0-9]/g, "");
     return `employee-${job.businessId}-${job.employeeId}-${requestVersion}`;

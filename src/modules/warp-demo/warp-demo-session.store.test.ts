@@ -1,35 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWarpDemoSessionStore, WarpDemoBusyError, WarpDemoMutationLimitError, WarpDemoRunConflictError, WarpDemoSessionExpiredError } from "./warp-demo-session.store.js";
+import { createWarpDemoSessionStore, WarpDemoMutationLimitError, WarpDemoRunConflictError, WarpDemoSessionExpiredError, WarpDemoStaleRunError, type WarpDemoSeed } from "./warp-demo-session.store.js";
 import { MemoryWarpDemoRedis } from "./warp-demo-test-redis.js";
+
+export const sandboxSeed = (): WarpDemoSeed => ({
+  businessId: "business", employee: { id: "maya", fullName: "Maya Patel", jobTitle: "Engineer", employeeListId: "engineering", employeeTypeId: "full-time", groupIds: ["remote"], state: "California", status: "active", employmentStartDate: "2024-01-01T00:00:00.000Z" },
+  departments: [{ id: "engineering", name: "Engineering", status: "active" }, { id: "finance", name: "Finance", status: "active" }], employeeTypes: [{ id: "full-time", name: "Full Time", status: "active" }, { id: "contractor", name: "Contractor", status: "active" }], groups: [{ id: "remote", name: "Remote", status: "active" }], categories: [], policies: [], rules: [],
+});
 
 describe("Warp demo session store", () => {
   afterEach(() => vi.useRealTimers());
-  it("creates an unpredictable expiring exclusive session", async () => {
-    const redis = new MemoryWarpDemoRedis();
-    const store = createWarpDemoSessionStore({ redis, sessionTtlSeconds: 900, maxMutations: 2 });
-    const first = await store.createSession();
-    expect(first.id).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    await expect(store.createSession()).rejects.toBeInstanceOf(WarpDemoBusyError);
-    await store.closeSession(first.id);
-    const second = await store.createSession();
-    expect(second.id).not.toBe(first.id);
-  });
-  it("rejects invalid and expired sessions", async () => {
-    vi.useFakeTimers();
-    const redis = new MemoryWarpDemoRedis();
-    const store = createWarpDemoSessionStore({ redis, sessionTtlSeconds: 300, maxMutations: 2 });
-    await expect(store.getSession("missing")).rejects.toBeInstanceOf(WarpDemoSessionExpiredError);
-    const session = await store.createSession();
-    vi.advanceTimersByTime(301_000);
-    await expect(store.getSession(session.id)).rejects.toBeInstanceOf(WarpDemoSessionExpiredError);
-  });
-  it("allows one in-flight run and enforces the session mutation limit", async () => {
-    const redis = new MemoryWarpDemoRedis();
-    const store = createWarpDemoSessionStore({ redis, sessionTtlSeconds: 900, maxMutations: 1 });
-    const session = await store.createSession();
-    await store.claimRun(session.id, "run-1");
-    await expect(store.claimRun(session.id, "run-2")).rejects.toBeInstanceOf(WarpDemoRunConflictError);
-    await store.finishRun(session.id, "run-1");
-    await expect(store.claimRun(session.id, "run-2")).rejects.toBeInstanceOf(WarpDemoMutationLimitError);
-  });
+  it("creates multiple independent unpredictable sessions", async () => { const store = createWarpDemoSessionStore({ redis: new MemoryWarpDemoRedis(), sessionTtlSeconds: 900, maxMutations: 2 }); const [first, second] = await Promise.all([store.createSession(sandboxSeed()), store.createSession(sandboxSeed())]); expect(first.id).toMatch(/^[A-Za-z0-9_-]{43}$/); expect(second.id).not.toBe(first.id); });
+  it("rejects expired sessions", async () => { vi.useFakeTimers(); const store = createWarpDemoSessionStore({ redis: new MemoryWarpDemoRedis(), sessionTtlSeconds: 300, maxMutations: 2 }); const session = await store.createSession(sandboxSeed()); vi.advanceTimersByTime(301_000); await expect(store.getSession(session.id)).rejects.toBeInstanceOf(WarpDemoSessionExpiredError); });
+  it("does not let a delayed run resurrect an expired session", async () => { vi.useFakeTimers(); const redis = new MemoryWarpDemoRedis(); const store = createWarpDemoSessionStore({ redis, sessionTtlSeconds: 300, maxMutations: 2 }); const session = await store.createSession(sandboxSeed()); const revision = await store.beginRun({ sessionId: session.id, runId: "delayed", expectedRevision: 0, employee: session.employee }); vi.advanceTimersByTime(301_000); await expect(store.commitRun({ sessionId: session.id, runId: "delayed", revision, assignments: [], audit: [] })).rejects.toBeInstanceOf(WarpDemoSessionExpiredError); expect(await redis.hgetall(`warp-demo:session:${session.id}`)).toEqual({}); });
+  it("guards runs per session and enforces mutation limits", async () => { const store = createWarpDemoSessionStore({ redis: new MemoryWarpDemoRedis(), sessionTtlSeconds: 900, maxMutations: 1 }); const session = await store.createSession(sandboxSeed()); await store.beginRun({ sessionId: session.id, runId: "one", expectedRevision: 0, employee: session.employee }); await expect(store.beginRun({ sessionId: session.id, runId: "two", expectedRevision: 1, employee: session.employee })).rejects.toBeInstanceOf(WarpDemoRunConflictError); await store.finishRun(session.id, "one"); await expect(store.beginRun({ sessionId: session.id, runId: "two", expectedRevision: 1, employee: session.employee })).rejects.toBeInstanceOf(WarpDemoMutationLimitError); });
+  it("reset supersedes an older run and rejects its commit", async () => { const store = createWarpDemoSessionStore({ redis: new MemoryWarpDemoRedis(), sessionTtlSeconds: 900, maxMutations: 3 }); const session = await store.createSession(sandboxSeed()); const changed = { ...session.employee, state: "New York" }; const oldRevision = await store.beginRun({ sessionId: session.id, runId: "old", expectedRevision: 0, employee: changed }); const current = await store.getSession(session.id); const resetRevision = await store.beginRun({ sessionId: session.id, runId: "reset", expectedRevision: current.revision, employee: current.baselineEmployee, supersede: true }); expect(resetRevision).toBeGreaterThan(oldRevision); await expect(store.commitRun({ sessionId: session.id, runId: "old", revision: oldRevision, assignments: [], audit: [] })).rejects.toBeInstanceOf(WarpDemoStaleRunError); });
 });

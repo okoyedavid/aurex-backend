@@ -6,14 +6,26 @@ const employee = document({ id: "e1", employeeListId: "d1", employeeTypeId: "t1"
 const category = (cardinality: "ONE" | "MANY") => document({ id: "c1", status: "active", cardinality });
 const policy = (id: string) => document({ id, categoryId: "c1", version: 1, status: "active" });
 const rule = (id: string, policyId: string, priority: number) => document({ id, policyId, priority, conditions: [{ field: "state", operator: "equals", value: "CA" }], status: "active" });
+const departments = new Map([["d1", "Engineering"], ["d2", "Finance"]]);
+const employeeTypes = new Map([["t1", "Full Time"], ["t2", "Contractor"]]);
+const groups = new Map([["g1", "Remote"], ["g2", "Executive"]]);
 
 const resolverFor = ({ cardinality = "ONE", rules = [], manuals = [], employeeOverrides = {} }: { cardinality?: "ONE" | "MANY"; rules?: ReturnType<typeof rule>[]; manuals?: object[]; employeeOverrides?: Record<string, unknown> }) => {
   const currentEmployee = document({ ...employee, ...employeeOverrides });
   return createPolicyResolver({
   employeeRepository: { findByIdAndBusiness: async () => currentEmployee } as never,
-  employeeListRepository: { findEmployeeListByBusinessAndId: async (_businessId: string, listId: string) => ({ id: listId, name: "Engineering", status: "active" }) } as never,
-  employeeTypeRepository: { findActiveByBusinessAndId: async (_businessId: string, typeId: string) => ({ id: typeId, name: "Full Time" }) } as never,
-  employeeGroupRepository: { findActiveByBusinessAndIds: async (_businessId: string, ids: string[]) => ids.map((id) => ({ id, name: "Remote" })) } as never,
+  employeeListRepository: {
+    findEmployeeListByBusinessAndId: async (_businessId: string, listId: string) => departments.has(listId) ? { id: listId, name: departments.get(listId)!, status: "active" } : null,
+    findEmployeeListsByBusinessAndIds: async (_businessId: string, ids: string[]) => ids.flatMap((id) => departments.has(id) ? [{ id, name: departments.get(id)!, status: "active" }] : []),
+  } as never,
+  employeeTypeRepository: {
+    findActiveByBusinessAndId: async (_businessId: string, typeId: string) => employeeTypes.has(typeId) ? { id: typeId, name: employeeTypes.get(typeId)! } : null,
+    findByBusinessAndIds: async (_businessId: string, ids: string[]) => ids.flatMap((id) => employeeTypes.has(id) ? [{ id, name: employeeTypes.get(id)! }] : []),
+  } as never,
+  employeeGroupRepository: {
+    findActiveByBusinessAndIds: async (_businessId: string, ids: string[]) => ids.flatMap((id) => groups.has(id) ? [{ id, name: groups.get(id)! }] : []),
+    findByBusinessAndIds: async (_businessId: string, ids: string[]) => ids.flatMap((id) => groups.has(id) ? [{ id, name: groups.get(id)! }] : []),
+  } as never,
   policyRepository: {
     findEffectiveRules: async () => rules,
     findAssignmentsAsOf: async () => manuals,
@@ -92,6 +104,45 @@ describe("policy resolver", () => {
       expect.objectContaining({ expectedDisplayValue: "Full Time" }),
       expect.objectContaining({ expectedDisplayValue: "Remote" }),
     ]);
+  });
+
+  it("keeps differing department labels and raw IDs distinct", async () => {
+    const financeOnly = document({ ...rule("r1", "p1", 10), conditions: [{ field: "department", operator: "equals", value: "d2" }] });
+    const result = await resolverFor({ rules: [financeOnly] }).resolvePoliciesForEmployee({ businessId: "b1", employeeId: "e1", asOfDate: new Date() });
+    expect(result.desiredPolicies).toHaveLength(0);
+    expect(result.evaluatedRules[0]?.conditions[0]).toMatchObject({ condition: { value: "d2" }, actualValue: "d1", expectedDisplayValue: "Finance", actualDisplayValue: "Engineering", matched: false });
+  });
+
+  it("keeps differing employee-type labels distinct", async () => {
+    const contractorsOnly = document({ ...rule("r1", "p1", 10), conditions: [{ field: "employeeType", operator: "equals", value: "t2" }] });
+    const result = await resolverFor({ rules: [contractorsOnly] }).resolvePoliciesForEmployee({ businessId: "b1", employeeId: "e1", asOfDate: new Date() });
+    expect(result.evaluatedRules[0]?.conditions[0]).toMatchObject({ condition: { value: "t2" }, actualValue: "t1", expectedDisplayValue: "Contractor", actualDisplayValue: "Full Time", matched: false });
+  });
+
+  it("loads referenced groups the employee does not belong to", async () => {
+    const executivesOnly = document({ ...rule("r1", "p1", 10), conditions: [{ field: "group", operator: "contains", value: "g2" }] });
+    const result = await resolverFor({ rules: [executivesOnly] }).resolvePoliciesForEmployee({ businessId: "b1", employeeId: "e1", asOfDate: new Date() });
+    expect(result.evaluatedRules[0]?.conditions[0]).toMatchObject({ condition: { value: "g2" }, actualValue: ["g1"], expectedDisplayValue: "Executive", actualDisplayValue: ["Remote"], matched: false });
+  });
+
+  it("resolves expected arrays item by item without changing order", async () => {
+    const listedDepartments = document({ ...rule("r1", "p1", 10), conditions: [{ field: "department", operator: "in", value: ["d2", "d1"] }] });
+    const result = await resolverFor({ rules: [listedDepartments] }).resolvePoliciesForEmployee({ businessId: "b1", employeeId: "e1", asOfDate: new Date() });
+    expect(result.desiredPolicies).toHaveLength(1);
+    expect(result.evaluatedRules[0]?.conditions[0]).toMatchObject({ condition: { value: ["d2", "d1"] }, expectedDisplayValue: ["Finance", "Engineering"], actualDisplayValue: "Engineering", matched: true });
+  });
+
+  it("uses an explicit unavailable label without substituting the employee value", async () => {
+    const unavailableDepartment = document({ ...rule("r1", "p1", 10), conditions: [{ field: "department", operator: "equals", value: "d-missing" }] });
+    const result = await resolverFor({ rules: [unavailableDepartment] }).resolvePoliciesForEmployee({ businessId: "b1", employeeId: "e1", asOfDate: new Date() });
+    expect(result.evaluatedRules[0]?.conditions[0]).toMatchObject({ expectedDisplayValue: "Department unavailable.", actualDisplayValue: "Engineering", matched: false });
+  });
+
+  it("keeps matched rule IDs paired with their names while sorting deterministically", async () => {
+    const first = document({ ...rule("r2", "p1", 10), name: "Alpha" });
+    const second = document({ ...rule("r1", "p1", 10), name: "Zulu" });
+    const result = await resolverFor({ rules: [first, second] }).resolvePoliciesForEmployee({ businessId: "b1", employeeId: "e1", asOfDate: new Date() });
+    expect(result.desiredPolicies[0]).toMatchObject({ matchedRuleIds: ["r1", "r2"], matchedRuleNames: ["Zulu", "Alpha"] });
   });
 
   it("returns no desired assignments for an archived employee", async () => {
