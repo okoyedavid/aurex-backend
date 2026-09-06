@@ -3,6 +3,7 @@ import {
   enqueuePolicyReconciliation,
 } from "../../queues/policy-reconciliation.queue.js";
 import { createHttpError } from "../../utils/api-error.js";
+import { withTransaction } from "../../utils/mongooose-transactions.js";
 import { auditEventService } from "../audit-event/audit-event.module.js";
 import { businessMemberRepository } from "../business-member/business-member.repository.js";
 import { employeeRepository } from "../employee/employee.repository.js";
@@ -27,6 +28,7 @@ export const githubConnectionService = createGitHubConnectionService({
   businessMemberRepository,
   clientFactory: githubClientFactory,
   auditService: auditEventService,
+  withTransaction,
   createHttpError,
   enqueueEmployeeExternalReconciliation,
   enqueueBusinessReconciliation: (businessId, reason, requestedBy) =>

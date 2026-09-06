@@ -53,6 +53,9 @@ const envSchema = z.object({
     .string()
     .regex(/^[a-f\d]{24}$/i, "WARP_DEMO_BUSINESS_ID must be a Mongo ObjectId")
     .optional(),
+  WARP_DEMO_SESSION_TTL_SECONDS: z.coerce.number().int().min(300).max(3600).default(900),
+  WARP_DEMO_RUN_TTL_SECONDS: z.coerce.number().int().min(900).max(7200).default(1800),
+  WARP_DEMO_MAX_MUTATIONS_PER_SESSION: z.coerce.number().int().min(1).max(50).default(12),
   POLICY_RECONCILIATION_CONCURRENCY: z.coerce.number().int().min(1).max(50).default(3),
   POLICY_RECONCILIATION_BATCH_SIZE: z.coerce.number().int().min(10).max(1000).default(100),
   POLICY_RECONCILIATION_NIGHTLY_CRON: z.string().min(1).default("0 2 * * *"),

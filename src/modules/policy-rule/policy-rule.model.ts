@@ -31,6 +31,8 @@ export interface PolicyRuleCondition {
   field: PolicyRuleField;
   operator: PolicyRuleOperator;
   value: PolicyRuleConditionValue;
+  /** Read-only presentation value populated by policy read endpoints. */
+  displayValue?: string | string[];
 }
 
 export type PolicyRuleStatus = "active" | "disabled";

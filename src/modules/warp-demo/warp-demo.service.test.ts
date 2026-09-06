@@ -1,5 +1,7 @@
+import crypto from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createWarpDemoService } from "./warp-demo.service.js";
+import { WarpDemoRunConflictError, WarpDemoSessionExpiredError } from "./warp-demo-session.store.js";
 
 const businessId = "68b000000000000000000001";
 const employeeId = "68b000000000000000000002";
@@ -9,24 +11,33 @@ const departmentId = "68b000000000000000000005";
 const typeId = "68b000000000000000000006";
 const groupId = "68b000000000000000000007";
 const ruleId = "68b000000000000000000008";
+const financeId = "68b000000000000000000009";
+const contractorId = "68b000000000000000000010";
+const remoteGroupId = "68b000000000000000000012";
 
 const setup = (configuredBusinessId: string | undefined = businessId) => {
   const employee = { _id: employeeId, fullName: "Sarah Chen", jobTitle: "VP Engineering", employeeListId: departmentId, employeeTypeId: typeId, groupIds: [groupId], state: "California", employmentStartDate: new Date("2020-01-01"), bankName: "SECRET BANK", accountNumber: "SECRET ACCOUNT", amount: 100000, businessMemberId: "SECRET MEMBER" };
+  let demoEmployee = { ...employee, _id: "68b000000000000000000011", fullName: "Maya Patel", jobTitle: "Software Engineer", groupIds: [remoteGroupId] };
   const category = { _id: categoryId, name: "Vacation Plan", description: "One plan wins", cardinality: "ONE", status: "active" };
   const policy = { _id: policyId, categoryId, name: "Executive Vacation", description: "Executive plan", status: "active", version: 1, effectiveFrom: null, effectiveTo: null, configuration: { secret: true } };
   const rule = { _id: ruleId, policyId, name: "Executive", priority: 40, status: "active", conditions: [{ field: "group", operator: "contains", value: groupId }] };
   const repository = {
     findBusiness: vi.fn(async () => ({ _id: businessId, name: "Northstar Labs", email: "warp-demo@northstar.invalid", ownerUserId: "SECRET OWNER" })),
-    listEmployees: vi.fn(async () => [employee]), findEmployee: vi.fn(async (_businessId: string, id: string) => id === employeeId ? employee : null),
-    listEmployeeLists: vi.fn(async () => [{ _id: departmentId, name: "Engineering" }]), listEmployeeTypes: vi.fn(async () => [{ _id: typeId, name: "Full Time" }]), listEmployeeGroups: vi.fn(async () => [{ _id: groupId, name: "Executive" }]),
+    listEmployees: vi.fn(async () => [employee]), findEmployee: vi.fn(async (_businessId: string, id: string) => id === employeeId ? employee : id === demoEmployee._id ? demoEmployee : null), findEmployeeByName: vi.fn(async () => demoEmployee),
+    listEmployeeLists: vi.fn(async () => [{ _id: departmentId, name: "Engineering" }, { _id: financeId, name: "Finance" }]), listEmployeeTypes: vi.fn(async () => [{ _id: typeId, name: "Full Time" }, { _id: contractorId, name: "Contractor" }]), listEmployeeGroups: vi.fn(async () => [{ _id: groupId, name: "Executive" }, { _id: remoteGroupId, name: "Remote" }]),
     listCategories: vi.fn(async () => [category]), listPolicies: vi.fn(async () => [policy]), findPolicy: vi.fn(async (_businessId: string, id: string) => id === policyId ? policy : null), listRules: vi.fn(async () => [rule]),
     listActiveAssignments: vi.fn(async () => [{ _id: "assignment", employeeId, policyId, categoryId, winningRuleId: ruleId, source: "rule", status: "active", effectiveFrom: new Date("2026-01-01"), matchedRuleIds: [ruleId] }]),
     countActiveRules: vi.fn(async () => 1), countActiveAssignments: vi.fn(async () => 1),
     listAudit: vi.fn(async () => [{ _id: "audit", entityType: "employee_policy_assignment", action: "ASSIGNMENT_CREATED", actorType: "worker", actorUserId: "SECRET USER", actorBusinessMemberId: "SECRET MEMBER", employeeId, policyId, categoryId, before: { secret: true }, after: { secret: true }, metadata: { token: true }, reason: "warp_demo_seed", occurredAt: new Date("2026-01-01") }]),
+    findGitHubConnection: vi.fn(async () => null), countManagedExternalGrants: vi.fn(async () => 0),
   };
   const resolver = { resolvePoliciesForEmployee: vi.fn(async () => ({ employeeId, businessId, evaluationDate: new Date("2026-01-01"), desiredPolicies: [{ policyId, categoryId }], suppressedCandidates: [], evaluatedRules: [{ ruleId, policyId, priority: 40, matched: true, conditions: [{ condition: { field: "group", operator: "contains", value: groupId }, actualValue: [groupId], matched: true }] }], categoryDecisions: [] })) };
   const createHttpError = (message: string, statusCode: number) => Object.assign(new Error(message), { statusCode });
-  return { repository, resolver, service: createWarpDemoService({ repository: repository as any, resolver: resolver as any, businessId: configuredBusinessId, createHttpError }) };
+  const sessionStore = { createSession: vi.fn(async () => ({ id: "s".repeat(43), employeeAlias: "maya", createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 900_000).toISOString(), mutationCount: 0 })), getSession: vi.fn(async (id: string) => ({ id, employeeAlias: "maya", createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 900_000).toISOString(), mutationCount: 0 })), claimRun: vi.fn(async () => undefined), finishRun: vi.fn(async () => undefined), closeSession: vi.fn(async () => undefined) };
+  const progressService = { createRun: vi.fn(async () => undefined), appendEvent: vi.fn(async () => undefined), markFailed: vi.fn(async () => undefined), getRun: vi.fn(async () => null) };
+  const employeeService = { updateBusinessEmployee: vi.fn(async ({ updates }: { updates: Record<string, unknown> }) => { demoEmployee = { ...demoEmployee, ...updates }; return demoEmployee; }) };
+  const enqueueReconciliation = vi.fn(async () => ({ id: "queued" }));
+  return { repository, resolver, sessionStore, progressService, employeeService, enqueueReconciliation, service: createWarpDemoService({ repository: repository as any, resolver: resolver as any, businessId: configuredBusinessId, createHttpError, employeeService: employeeService as any, sessionStore: sessionStore as any, progressService: progressService as any, enqueueReconciliation }) };
 };
 
 describe("Warp demo public DTO boundary", () => {
@@ -40,4 +51,12 @@ describe("Warp demo public DTO boundary", () => {
   it("returns actual cardinality semantics", async () => { const { service } = setup(); expect((await service.categories()).categories[0]).toMatchObject({ cardinality: "ONE", maxAssignments: 1 }); });
   it("does not expose policy configuration or creator fields", async () => { const { service } = setup(); const json = JSON.stringify(await service.policy(policyId)); expect(json).not.toMatch(/configuration|createdBy|updatedBy|businessId|secret/); });
   it("sanitizes policy-domain audit data", async () => { const { service } = setup(); const result = await service.audit({ limit: 25 }); const json = JSON.stringify(result); expect(result.events[0].actor).toEqual({ type: "worker", displayName: "Aurex policy engine" }); expect(json).not.toMatch(/SECRET|before|after|metadata|token|actorUserId|actorBusinessMemberId/); });
+  it("creates a session with a deterministic baseline reset through the real employee service", async () => { const fixture = setup(); const result = await fixture.service.createSession(); expect(result).toMatchObject({ sessionId: "s".repeat(43), employee: { alias: "maya", department: "Engineering", employeeType: "Full Time", state: "California" }, initialization: { status: "queued" } }); expect(fixture.employeeService.updateBusinessEmployee).toHaveBeenCalledWith(expect.objectContaining({ businessId, deferPolicyReconciliation: true, updates: expect.objectContaining({ employeeListId: departmentId, employeeTypeId: typeId, state: "California", groupIds: [remoteGroupId] }) })); });
+  it("maps an allowed department alias to the seeded resource and propagates run correlation", async () => { const fixture = setup(); const result = await fixture.service.mutate("s".repeat(43), { employee: "maya", field: "department", value: "finance" }); expect(result.status).toBe("queued"); expect(fixture.employeeService.updateBusinessEmployee).toHaveBeenCalledWith(expect.objectContaining({ updates: { employeeListId: financeId }, deferPolicyReconciliation: true })); expect(fixture.enqueueReconciliation).toHaveBeenCalledWith(expect.objectContaining({ type: "RECONCILE_EMPLOYEE", correlationId: result.runId, demoRun: expect.objectContaining({ runId: result.runId, sessionId: "s".repeat(43), employeeChanged: true, suppressExternalExecution: true }) })); });
+  it("maps an in-flight session conflict to a safe 409", async () => { const fixture = setup(); fixture.sessionStore.claimRun.mockRejectedValue(new WarpDemoRunConflictError("A reconciliation is already in progress.")); await expect(fixture.service.mutate("s".repeat(43), { employee: "maya", field: "state", value: "new_york" })).rejects.toMatchObject({ statusCode: 409, message: "A reconciliation is already in progress." }); });
+  it("resets only known facts and queues reconciliation instead of fabricating assignments", async () => { const fixture = setup(); await fixture.service.mutate("s".repeat(43), { employee: "maya", field: "department", value: "finance" }); const reset = await fixture.service.reset("s".repeat(43)); expect(reset).toMatchObject({ status: "queued", employee: { alias: "maya", department: "Engineering", employeeType: "Full Time", state: "California" } }); expect(fixture.repository.listActiveAssignments).not.toHaveBeenCalled(); expect(fixture.employeeService.updateBusinessEmployee).toHaveBeenLastCalledWith(expect.objectContaining({ updates: expect.objectContaining({ employeeListId: departmentId, employeeTypeId: typeId, state: "California" }) })); });
+  it("refuses mutable sessions if the demo tenant has live GitHub execution state", async () => { const fixture = setup(); fixture.repository.findGitHubConnection.mockResolvedValue({ status: "active", installationId: 42 }); await expect(fixture.service.createSession()).rejects.toMatchObject({ statusCode: 503 }); expect(fixture.sessionStore.createSession).not.toHaveBeenCalled(); });
+  it("maps expired sessions to a safe public error", async () => { const fixture = setup(); fixture.sessionStore.getSession.mockRejectedValue(new WarpDemoSessionExpiredError("Demo session expired.")); await expect(fixture.service.reconciliationRun("s".repeat(43), crypto.randomUUID())).rejects.toMatchObject({ statusCode: 410, message: "Demo session expired." }); });
+  it("returns only runs owned by the session", async () => { const fixture = setup(); fixture.progressService.getRun.mockResolvedValue(null); await expect(fixture.service.reconciliationRun("s".repeat(43), crypto.randomUUID())).rejects.toMatchObject({ statusCode: 404 }); });
+  it("marks queue failures terminal and releases the session", async () => { const fixture = setup(); fixture.enqueueReconciliation.mockResolvedValue(null); await expect(fixture.service.mutate("s".repeat(43), { employee: "maya", field: "department", value: "finance" })).rejects.toMatchObject({ statusCode: 503 }); expect(fixture.progressService.markFailed).toHaveBeenCalledOnce(); expect(fixture.sessionStore.finishRun).toHaveBeenCalledOnce(); });
 });

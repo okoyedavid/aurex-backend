@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { HttpError } from "../../utils/api-error.js";
+import type { WithTransaction } from "../../utils/mongooose-transactions.js";
 import type { AuditEventService } from "../audit-event/audit-event.service.js";
 import type { BusinessMemberRepository } from "../business-member/business-member.repository.js";
 import type { EmployeeRepository } from "../employee/employee.repository.js";
@@ -18,6 +19,7 @@ type Dependencies = {
   businessMemberRepository: BusinessMemberRepository;
   clientFactory: GitHubClientFactory;
   auditService: AuditEventService;
+  withTransaction: WithTransaction;
   createHttpError: (message: string, statusCode: number) => HttpError;
   enqueueEmployeeExternalReconciliation: (businessId: string, employeeId: string, reason: string, requestedBy?: string) => Promise<unknown>;
   enqueueBusinessReconciliation: (businessId: string, reason: string, requestedBy?: string) => Promise<unknown>;
@@ -42,7 +44,7 @@ export class GitHubCallbackError extends Error {
   }
 }
 
-export const createGitHubConnectionService = ({ repository, employeeRepository, businessMemberRepository, clientFactory, auditService, createHttpError, enqueueEmployeeExternalReconciliation, enqueueBusinessReconciliation }: Dependencies) => {
+export const createGitHubConnectionService = ({ repository, employeeRepository, businessMemberRepository, clientFactory, auditService, withTransaction, createHttpError, enqueueEmployeeExternalReconciliation, enqueueBusinessReconciliation }: Dependencies) => {
   const memberId = async (businessId: string, userId: string) => {
     const member = await businessMemberRepository.findActiveMembershipByBusinessAndUser(businessId, userId);
     return member?.id ?? null;
@@ -218,7 +220,8 @@ export const createGitHubConnectionService = ({ repository, employeeRepository, 
   };
 
   const setIdentity = async (businessId: string, employeeId: string, username: string, userId: string) => {
-    if (!await employeeRepository.findByIdAndBusiness(employeeId, businessId)) throw createHttpError("Employee not found in this business", 404);
+    const employee = await employeeRepository.findByIdAndBusiness(employeeId, businessId);
+    if (!employee) throw createHttpError("Employee not found in this business", 404);
     const connection = await repository.findConnection(businessId);
     let resolved: { id: number; login: string } | null = null;
     if (connection?.status === "active" && connection.installationId) {
@@ -228,17 +231,44 @@ export const createGitHubConnectionService = ({ repository, employeeRepository, 
         throw error;
       }
     }
-    const identity = await repository.upsertIdentity(businessId, employeeId, { username: resolved?.login ?? username, externalId: resolved?.id ?? null, verificationStatus: resolved ? "verified" : "unverified" });
-    await auditService.recordEventSafely({ eventType: "github.identity.updated", category: "business", outcome: "success", userId, email: null, businessId, actorBusinessMemberId: await memberId(businessId, userId), employeeId, subjectType: "employee", subjectId: employeeId, summary: `GitHub identity @${identity.username} was assigned to the employee.`, metadata: { provider: "github", employeeId, githubUserId: identity.externalId, githubUsername: identity.username } });
+    const proposed = { username: resolved?.login ?? username, externalId: resolved?.id ?? null, verificationStatus: resolved ? "verified" as const : "unverified" as const };
+    const { identity, previous, principalChanged } = await withTransaction(async (session) => {
+      const previous = await repository.findIdentity(businessId, employeeId, { session });
+      const previousPrincipal = previous ? { externalId: previous.externalId ?? null, username: previous.username } : null;
+      const proposedPrincipal = { externalId: proposed.externalId, username: proposed.username };
+      const samePrincipal = Boolean(previousPrincipal) && (
+        previousPrincipal!.externalId !== null && proposedPrincipal.externalId !== null
+          ? previousPrincipal!.externalId === proposedPrincipal.externalId
+          : previousPrincipal!.externalId === null && proposedPrincipal.externalId === null && previousPrincipal!.username.toLowerCase() === proposedPrincipal.username.toLowerCase()
+      );
+      const identity = await repository.upsertIdentity(businessId, employeeId, proposed, { session });
+      if (previousPrincipal && samePrincipal) {
+        await repository.refreshEmployeeGrantPrincipalMetadata(businessId, employeeId, previousPrincipal, proposedPrincipal, { session });
+      } else {
+        await repository.stageEmployeeGrantPrincipal(businessId, employeeId, proposedPrincipal, { session });
+      }
+      return { identity, previous, principalChanged: !samePrincipal };
+    });
+    const summary = previous
+      ? `${employee.fullName}'s GitHub identity changed from @${previous.username} to @${identity.username}.`
+      : `GitHub identity @${identity.username} was assigned to ${employee.fullName}.`;
+    await auditService.recordEventSafely({ eventType: "github.identity.updated", category: "business", outcome: "success", userId, email: null, businessId, actorBusinessMemberId: await memberId(businessId, userId), employeeId, subjectType: "employee", subjectId: employeeId, summary, metadata: { provider: "github", employeeId, previousGitHubUserId: previous?.externalId ?? null, previousGitHubUsername: previous?.username ?? null, githubUserId: identity.externalId, githubUsername: identity.username, principalChanged } });
     await enqueueEmployeeExternalReconciliation(businessId, employeeId, "github_identity.updated", userId);
     return identity;
   };
 
   const removeIdentity = async (businessId: string, employeeId: string, userId: string) => {
-    if (!await employeeRepository.findByIdAndBusiness(employeeId, businessId)) throw createHttpError("Employee not found in this business", 404);
-    const identity = await repository.deleteIdentity(businessId, employeeId);
-    if (!identity) throw createHttpError("GitHub identity not found", 404);
-    await auditService.recordEventSafely({ eventType: "github.identity.removed", category: "business", outcome: "success", userId, email: null, businessId, actorBusinessMemberId: await memberId(businessId, userId), employeeId, subjectType: "employee", subjectId: employeeId, summary: `GitHub identity @${identity.username} was removed from the employee.`, metadata: { provider: "github", employeeId, githubUserId: identity.externalId, githubUsername: identity.username } });
+    const employee = await employeeRepository.findByIdAndBusiness(employeeId, businessId);
+    if (!employee) throw createHttpError("Employee not found in this business", 404);
+    const identity = await withTransaction(async (session) => {
+      const current = await repository.findIdentity(businessId, employeeId, { session });
+      if (!current) throw createHttpError("GitHub identity not found", 404);
+      await repository.stageEmployeeGrantPrincipal(businessId, employeeId, null, { session });
+      const deleted = await repository.deleteIdentity(businessId, employeeId, { session });
+      if (!deleted) throw createHttpError("GitHub identity not found", 404);
+      return deleted;
+    });
+    await auditService.recordEventSafely({ eventType: "github.identity.removed", category: "business", outcome: "success", userId, email: null, businessId, actorBusinessMemberId: await memberId(businessId, userId), employeeId, subjectType: "employee", subjectId: employeeId, summary: `${employee.fullName}'s GitHub identity @${identity.username} was removed. Managed access will be removed from that account.`, metadata: { provider: "github", employeeId, githubUserId: identity.externalId, githubUsername: identity.username } });
     await enqueueEmployeeExternalReconciliation(businessId, employeeId, "github_identity.removed", userId);
     return identity;
   };

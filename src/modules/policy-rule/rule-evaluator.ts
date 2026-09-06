@@ -17,6 +17,8 @@ export type EmployeePolicyContext = {
 export type ConditionEvaluation = {
   condition: PolicyRuleCondition;
   actualValue: string | string[] | number | null;
+  expectedDisplayValue?: string | string[] | number | null;
+  actualDisplayValue?: string | string[] | number | null;
   matched: boolean;
 };
 

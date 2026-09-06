@@ -483,12 +483,14 @@ const createEmployeeService = ({
     updates,
     requestedBy,
     expectedEmployeeListId,
+    deferPolicyReconciliation = false,
   }: {
     businessId: string;
     employeeId: string;
     updates: UpdateEmployeeInput;
     requestedBy?: string;
     expectedEmployeeListId?: string;
+    deferPolicyReconciliation?: boolean;
   }) => {
     const existing = await requireEmployeeForBusiness(businessId, employeeId);
     const currentEmployeeListId = String(existing.employeeListId);
@@ -609,7 +611,7 @@ const createEmployeeService = ({
       "employmentStartDate",
       "status",
     ];
-    if (policyRelevantFields.some((field) => field in updates)) {
+    if (!deferPolicyReconciliation && policyRelevantFields.some((field) => field in updates)) {
       try {
         await enqueuePolicyReconciliation({
           type: "RECONCILE_EMPLOYEE",
@@ -667,17 +669,20 @@ const createEmployeeService = ({
     employeeId,
     updates,
     requestedBy,
+    deferPolicyReconciliation,
   }: {
     businessId: string;
     employeeId: string;
     updates: UpdateEmployeeInput;
     requestedBy?: string;
+    deferPolicyReconciliation?: boolean;
   }) => {
     await updateEmployeeForBusinessInternal({
       businessId,
       employeeId,
       updates,
       requestedBy,
+      deferPolicyReconciliation,
     });
     return getEmployeeProfile({ businessId, employeeId });
   };

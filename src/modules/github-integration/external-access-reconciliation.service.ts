@@ -30,17 +30,17 @@ export const createExternalAccessReconciliationService = ({
     businessId: string,
     employeeId: string,
   ) => {
-    const [pairs, existing] = await Promise.all([
+    const [pairs, existing, identity] = await Promise.all([
       repository.findActiveAssignmentsWithPolicies(businessId, employeeId),
       repository.listGrantsForEmployee(businessId, employeeId),
+      repository.findIdentity(businessId, employeeId),
     ]);
-    const desiredKeys = new Set<string>();
+    const desiredGrantIds = new Set<string>();
     const grants = [];
     for (const { assignment, policy } of pairs) {
       const target = githubTarget(policy.configuration);
       if (!target) continue;
       const resourceExternalId = githubResourceKey(target);
-      desiredKeys.add(`${assignment.id}:${resourceExternalId}`);
       const grant = await repository.upsertDesiredGrant({
         businessId,
         employeeId,
@@ -51,12 +51,17 @@ export const createExternalAccessReconciliationService = ({
         target,
         resourceExternalId,
         resourceDisplayName: githubResourceName(target),
+        desiredPrincipal: identity
+          ? { externalId: identity.externalId ?? null, username: identity.username }
+          : null,
       });
-      if (grant) grants.push(grant);
+      if (grant) {
+        desiredGrantIds.add(grant.id);
+        grants.push(grant);
+      }
     }
     for (const grant of existing) {
-      if (desiredKeys.has(`${grant.assignmentId}:${grant.resourceExternalId}`))
-        continue;
+      if (desiredGrantIds.has(grant.id)) continue;
       const revoked =
         grant.desiredState === "revoked"
           ? grant
@@ -73,8 +78,9 @@ export const createExternalAccessReconciliationService = ({
     state: ActualAccessState,
     executionAttemptId: string,
   ) => {
-    if (!grant || grant.lastAuditState === `${grant.desiredRevision}:${state}`)
-      return;
+    if (!grant) return;
+    const auditState = `${grant.desiredRevision}:${state}:${username.toLowerCase()}`;
+    if (grant.lastAuditState === auditState) return;
     const target = githubTarget(grant.target);
     if (!target) return;
     let eventType:
@@ -89,14 +95,11 @@ export const createExternalAccessReconciliationService = ({
       eventType = "github.access.granted";
       summary =
         target.resourceType === "team"
-          ? `${employeeName} was added to the ${grant.resourceDisplayName} GitHub team.`
-          : `GitHub repository access to ${grant.resourceDisplayName} was granted to ${employeeName}.`;
+          ? `GitHub access to the ${grant.resourceDisplayName} team was granted to @${username} for ${employeeName}.`
+          : `GitHub repository access to ${grant.resourceDisplayName} was granted to @${username} for ${employeeName}.`;
     } else if (state === "revoked") {
       eventType = "github.access.revoked";
-      summary =
-        target.resourceType === "team"
-          ? `${employeeName} was removed from the ${grant.resourceDisplayName} GitHub team because the policy no longer applied.`
-          : `Aurex-managed GitHub repository access to ${grant.resourceDisplayName} was removed from ${employeeName}.`;
+      summary = `Aurex-managed GitHub access to ${grant.resourceDisplayName} was removed from @${username} for ${employeeName}.`;
     } else if (state === "pending_acceptance") {
       eventType = "github.access.pending_acceptance";
       summary = `GitHub access is awaiting ${employeeName}'s invitation acceptance.`;
@@ -112,6 +115,8 @@ export const createExternalAccessReconciliationService = ({
         grant.lastErrorMessage ??
         `GitHub access for ${employeeName} needs configuration.`;
     }
+    const claimed = await repository.claimGrantAuditState(String(grant.businessId), grant.id, grant.desiredRevision, auditState, state);
+    if (!claimed) return;
     await auditService.recordEventSafely({
       eventType,
       category: "business",
@@ -143,10 +148,6 @@ export const createExternalAccessReconciliationService = ({
         executionAttemptId,
       },
     });
-    await repository.updateGrantResult(String(grant.businessId), grant.id, {
-      actualState: state,
-      lastAuditState: `${grant.desiredRevision}:${state}`,
-    });
   };
 
   const recordConfigurationState = async (
@@ -156,6 +157,7 @@ export const createExternalAccessReconciliationService = ({
     employeeName: string,
     code: string,
     message: string,
+    expectedRevision = grant.desiredRevision,
   ) => {
     const state: ActualAccessState =
       code === "github_permission_denied" ? "blocked" : "needs_configuration";
@@ -168,7 +170,9 @@ export const createExternalAccessReconciliationService = ({
         lastErrorCode: code,
         lastErrorMessage: message,
       },
+      expectedRevision,
     );
+    if (!updated) return { stale: true as const };
     await auditResult(
       updated,
       employeeName,
@@ -184,7 +188,7 @@ export const createExternalAccessReconciliationService = ({
     grantId: string,
     expectedRevision?: number,
   ) => {
-    const grant = await repository.findGrant(businessId, grantId);
+    let grant = await repository.findGrant(businessId, grantId);
     if (
       !grant ||
       (expectedRevision && grant.desiredRevision !== expectedRevision)
@@ -213,17 +217,6 @@ export const createExternalAccessReconciliationService = ({
         "github_connection_inactive",
         "GitHub access needs configuration because the integration is disconnected.",
       );
-    const identity = await repository.findIdentity(
-      businessId,
-      String(grant.employeeId),
-    );
-    if (!identity)
-      return recordConfigurationState(
-        grant,
-        employee.fullName,
-        "github_identity_missing",
-        `GitHub access for ${employee.fullName} needs configuration because no GitHub identity is assigned.`,
-      );
     const target = githubTarget(grant.target);
     if (!target)
       return recordConfigurationState(
@@ -232,63 +225,170 @@ export const createExternalAccessReconciliationService = ({
         "github_target_invalid",
         "GitHub access needs configuration because the policy target is invalid.",
       );
+    const revision = grant.desiredRevision;
     const executionAttemptId = crypto.randomUUID();
-    await repository.updateGrantResult(businessId, grantId, {
+    const pending = await repository.updateGrantResult(businessId, grantId, {
       actualState: "pending",
       lastAttemptAt: new Date(),
       lastErrorCode: null,
       lastErrorMessage: null,
-    });
+    }, revision);
+    if (!pending) return { stale: true };
+    grant = pending;
     try {
       const connector = new GitHubAccessConnector(
         clientFactory.forInstallation(connection.installationId),
       );
-      const result =
-        grant.desiredState === "granted"
-          ? await connector.ensureGranted(
-              target,
-              identity.username,
-              grant.managedGrantCreated,
-              grant.baselinePermission,
-            )
-          : await connector.ensureRevoked(
-              target,
-              identity.username,
-              grant.managedGrantCreated,
-              grant.baselinePermission,
-            );
+
+      const samePrincipal = (left: { externalId: number | null; username: string } | null, right: { externalId: number | null; username: string } | null) => {
+        if (!left || !right) return left === right;
+        if (left.externalId !== null && right.externalId !== null) return left.externalId === right.externalId;
+        if (left.externalId !== null || right.externalId !== null) return false;
+        return left.username.toLowerCase() === right.username.toLowerCase();
+      };
+      const managedPrincipal = () => grant!.managedPrincipalUsername
+        ? { externalId: grant!.managedPrincipalExternalId ?? null, username: grant!.managedPrincipalUsername }
+        : null;
+      const desiredPrincipal = () => grant!.desiredPrincipalUsername
+        ? { externalId: grant!.desiredPrincipalExternalId ?? null, username: grant!.desiredPrincipalUsername }
+        : null;
+
+      // A crash may leave a principal for which a grant operation was in flight.
+      // Remove it first unless it has already become the finalized managed principal.
+      if (grant.pendingPrincipalUsername && !samePrincipal(
+        { externalId: grant.pendingPrincipalExternalId ?? null, username: grant.pendingPrincipalUsername },
+        managedPrincipal(),
+      )) {
+        const cleanup = await connector.ensureRevoked(target, grant.pendingPrincipalUsername, grant.pendingManagedGrantCreated, grant.pendingBaselinePermission);
+        if (cleanup.actualState === "failed") throw new GitHubApiError("github_verification_failed", "GitHub access cleanup verification failed", true);
+        const cleaned = await repository.updateGrantResult(businessId, grantId, {
+          actualState: "pending",
+          pendingPrincipalExternalId: null,
+          pendingPrincipalUsername: null,
+          pendingManagedGrantCreated: false,
+          pendingBaselinePermission: null,
+        }, revision);
+        if (!cleaned) return { stale: true };
+        grant = cleaned;
+      }
+
+      // Legacy managed grants did not retain their principal. Bind only when the
+      // current verified identity is observed on the exact managed resource.
+      if (!managedPrincipal() && grant.managedGrantCreated) {
+        const identity = await repository.findIdentity(businessId, String(grant.employeeId));
+        const candidate = desiredPrincipal() ?? (identity?.verificationStatus === "verified"
+          ? { externalId: identity.externalId ?? null, username: identity.username }
+          : null);
+        if (!candidate || candidate.externalId === null) {
+          return recordConfigurationState(grant, employee.fullName, "github_managed_principal_unknown", "GitHub access needs configuration because the account that received this legacy managed grant cannot be established safely.", revision);
+        }
+        const observed = await connector.readActualState(target, candidate.username);
+        if (observed.state === "absent") {
+          return recordConfigurationState(grant, employee.fullName, "github_managed_principal_unknown", "GitHub access needs configuration because the account that received this legacy managed grant cannot be established safely.", revision);
+        }
+        const rebound = await repository.updateGrantResult(businessId, grantId, {
+          actualState: "pending",
+          managedPrincipalExternalId: candidate.externalId,
+          managedPrincipalUsername: candidate.username,
+          desiredPrincipalExternalId: candidate.externalId,
+          desiredPrincipalUsername: candidate.username,
+        }, revision);
+        if (!rebound) return { stale: true };
+        grant = rebound;
+      }
+
+      const revokeManagedPrincipal = async () => {
+        const principal = managedPrincipal();
+        if (!principal) return { stale: false, changed: false };
+        const result = await connector.ensureRevoked(target, principal.username, grant!.managedGrantCreated, grant!.baselinePermission);
+        if (result.actualState === "failed") throw new GitHubApiError("github_verification_failed", "GitHub access revocation verification failed", true);
+        const updated = await repository.updateGrantResult(businessId, grantId, {
+          actualState: result.actualState,
+          managedGrantCreated: false,
+          managedPrincipalExternalId: null,
+          managedPrincipalUsername: null,
+          baselinePermission: null,
+          lastVerifiedAt: new Date(),
+          lastErrorCode: null,
+          lastErrorMessage: null,
+        }, revision);
+        if (!updated) return { stale: true, changed: result.changed };
+        grant = updated;
+        await auditResult(updated, employee.fullName, principal.username, result.actualState, executionAttemptId);
+        return { stale: false, changed: result.changed };
+      };
+
+      let changed = false;
+      if (managedPrincipal() && !samePrincipal(managedPrincipal(), desiredPrincipal())) {
+        const revoked = await revokeManagedPrincipal();
+        if (revoked.stale) return { stale: true };
+        changed ||= revoked.changed;
+      }
+
+      if (grant.desiredState === "revoked") {
+        if (managedPrincipal()) {
+          const revoked = await revokeManagedPrincipal();
+          if (revoked.stale) return { stale: true };
+          changed ||= revoked.changed;
+        }
+        const state: ActualAccessState = grant.actualState === "retained_external" ? "retained_external" : "revoked";
+        return { stale: false, changed, actualState: state };
+      }
+
+      const desired = desiredPrincipal();
+      if (!desired) {
+        return recordConfigurationState(grant, employee.fullName, "github_identity_missing", `GitHub access for ${employee.fullName} needs configuration because no GitHub identity is assigned.`, revision);
+      }
+
+      const currentManaged = managedPrincipal();
+      let result;
+      if (currentManaged && samePrincipal(currentManaged, desired)) {
+        result = await connector.ensureGranted(target, desired.username, grant.managedGrantCreated, grant.baselinePermission);
+      } else {
+        const before = await connector.readActualState(target, desired.username);
+        const alreadyDesired = target.resourceType === "team"
+          ? before.state === "present" || before.state === "pending"
+          : before.state === "present" && before.permission === target.permission;
+        if (alreadyDesired) {
+          result = {
+            actualState: before.state === "pending" ? "pending_acceptance" as const : "granted" as const,
+            changed: false,
+            managedGrantCreated: false,
+          };
+        } else {
+          const staged = await repository.updateGrantResult(businessId, grantId, {
+            actualState: "pending",
+            pendingPrincipalExternalId: desired.externalId,
+            pendingPrincipalUsername: desired.username,
+            pendingManagedGrantCreated: true,
+            pendingBaselinePermission: before.permission ?? null,
+          }, revision);
+          if (!staged) return { stale: true };
+          grant = staged;
+          result = await connector.ensureGranted(target, desired.username, false, before.permission ?? null);
+        }
+      }
+      if (result.actualState === "failed") throw new GitHubApiError("github_verification_failed", "GitHub access verification failed", true);
       const updated = await repository.updateGrantResult(businessId, grantId, {
         actualState: result.actualState,
         managedGrantCreated: result.managedGrantCreated,
-        ...(result.baselinePermission !== undefined
-          ? { baselinePermission: result.baselinePermission }
-          : {}),
+        managedPrincipalExternalId: desired.externalId,
+        managedPrincipalUsername: desired.username,
+        pendingPrincipalExternalId: null,
+        pendingPrincipalUsername: null,
+        pendingManagedGrantCreated: false,
+        pendingBaselinePermission: null,
+        ...(result.baselinePermission !== undefined ? { baselinePermission: result.baselinePermission } : {}),
         lastVerifiedAt: new Date(),
-        lastErrorCode:
-          result.actualState === "failed" ? "github_verification_failed" : null,
-        lastErrorMessage:
-          result.actualState === "failed"
-            ? "GitHub did not reach the requested state after the access change"
-            : null,
-      });
-      await auditResult(
-        updated,
-        employee.fullName,
-        identity.username,
-        result.actualState,
-        executionAttemptId,
-      );
-      if (result.actualState === "failed")
-        throw new GitHubApiError(
-          "github_verification_failed",
-          "GitHub access verification failed",
-          true,
-        );
-      return {
-        stale: false,
-        changed: result.changed,
-        actualState: result.actualState,
-      };
+        lastErrorCode: null,
+        lastErrorMessage: null,
+      }, revision);
+      if (!updated) {
+        if (result.managedGrantCreated) await connector.ensureRevoked(target, desired.username, true, result.baselinePermission);
+        return { stale: true };
+      }
+      await auditResult(updated, employee.fullName, desired.username, result.actualState, executionAttemptId);
+      return { stale: false, changed: changed || result.changed, actualState: result.actualState };
     } catch (error) {
       const normalized =
         error instanceof GitHubApiError
@@ -305,11 +405,11 @@ export const createExternalAccessReconciliationService = ({
         actualState: state,
         lastErrorCode: normalized.code,
         lastErrorMessage: normalized.message,
-      });
+      }, revision);
       await auditResult(
         updated,
         employee.fullName,
-        identity.username,
+        grant.managedPrincipalUsername ?? grant.desiredPrincipalUsername ?? grant.pendingPrincipalUsername ?? "unconfigured",
         state,
         executionAttemptId,
       );

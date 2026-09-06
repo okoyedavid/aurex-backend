@@ -7,6 +7,8 @@ const assignment = (value: Record<string, unknown>) => ({
   matchedRuleIds: [],
   status: "active",
   source: "rule",
+  effectiveFrom: new Date("2026-09-01T00:00:00.000Z"),
+  effectiveTo: null,
   ...value,
   toObject() { return { ...this }; },
 });
@@ -65,13 +67,20 @@ describe("policy reconciliation", () => {
     expect(updateAssignment).not.toHaveBeenCalled();
   });
 
-  it("updates an assignment when the policy version changes", async () => {
+  it("ends the old snapshot and starts a replacement when the policy version changes", async () => {
     const current = assignment({ id: "a1", policyId: "p1", categoryId: "c1", winningRuleId: "r1", matchedRuleIds: ["r1"] });
+    const history = [current];
     const audits: Array<Record<string, unknown>> = [];
+    const transitionAt = new Date("2026-09-04T00:00:00.000Z");
     const service = createPolicyReconciliationService({
       repository: {
         findAssignmentsAsOf: async () => [current],
         updateAssignment: async (_id: string, update: { $set: Record<string, unknown> }) => Object.assign(current, update.$set),
+        createAssignment: async (payload: Record<string, unknown>) => {
+          const created = assignment({ ...payload, id: "a2" });
+          history.push(created);
+          return created;
+        },
       } as never,
       employeeRepository: {} as never,
       resolver: { resolvePoliciesForEmployee: async () => ({ desiredPolicies: [{ policyId: "p1", categoryId: "c1", policyVersion: 2, source: "rule", priority: 10, winningRuleId: "r1", matchedRuleIds: ["r1"], conditionEvaluations: {}, manualAssignmentId: null }], suppressedCandidates: [] }) } as never,
@@ -79,17 +88,20 @@ describe("policy reconciliation", () => {
       withTransaction: async (work) => work(null as never),
       createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
     });
-    const result = await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: new Date(), reason: "policy.updated", actor: { actorType: "worker" }, triggeredByUserId: "u1" });
+    const result = await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: transitionAt, reason: "policy.updated", actor: { actorType: "worker" }, triggeredByUserId: "u1" });
     expect(result.changes[0]?.operation).toBe("UPDATE_VERSION");
-    expect(current.policyVersion).toBe(2);
+    expect(result.changes[0]).toMatchObject({ assignmentId: "a2", previousAssignmentId: "a1" });
+    expect(current).toMatchObject({ policyVersion: 1, status: "ended", effectiveTo: transitionAt });
+    expect(history[1]).toMatchObject({ policyVersion: 2, status: "active", effectiveFrom: transitionAt, effectiveTo: null });
     expect(audits[0]?.metadata).toMatchObject({ triggeredByUserId: "u1" });
   });
 
-  it("updates explainability when the matching rule set changes", async () => {
+  it("creates a temporal boundary when the meaningful matching rule set changes", async () => {
     const current = assignment({ id: "a1", policyId: "p1", categoryId: "c1", winningRuleId: "r1", matchedRuleIds: ["r1"] });
     const updateAssignment = vi.fn(async (_id: string, update: { $set: Record<string, unknown> }) => Object.assign(current, update.$set));
+    const createAssignment = vi.fn(async (payload: Record<string, unknown>) => assignment({ ...payload, id: "a2" }));
     const service = createPolicyReconciliationService({
-      repository: { findAssignmentsAsOf: async () => [current], updateAssignment } as never,
+      repository: { findAssignmentsAsOf: async () => [current], updateAssignment, createAssignment } as never,
       employeeRepository: {} as never,
       resolver: { resolvePoliciesForEmployee: async () => ({ desiredPolicies: [{ policyId: "p1", categoryId: "c1", policyVersion: 1, source: "rule", priority: 10, winningRuleId: "r1", matchedRuleIds: ["r1", "r2"], conditionEvaluations: {}, manualAssignmentId: null }], suppressedCandidates: [] }) } as never,
       auditService: { record: vi.fn() } as never,
@@ -98,7 +110,8 @@ describe("policy reconciliation", () => {
     });
     await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: new Date(), reason: "rule.created", actor: { actorType: "worker" } });
     expect(updateAssignment).toHaveBeenCalledOnce();
-    expect(current.matchedRuleIds).toEqual(["r1", "r2"]);
+    expect(current.matchedRuleIds).toEqual(["r1"]);
+    expect(createAssignment).toHaveBeenCalledWith(expect.objectContaining({ matchedRuleIds: ["r1", "r2"] }), { session: null });
   });
 
   it("explicitly ends and audits a manual assignment that is no longer valid", async () => {
@@ -124,6 +137,129 @@ describe("policy reconciliation", () => {
       }),
       null,
     );
+  });
+
+  it("preserves versioned as-of history and is idempotent after a transition", async () => {
+    const transitionAt = new Date("2026-09-04T00:00:00.000Z");
+    const beforeTransition = new Date("2026-09-02T00:00:00.000Z");
+    const afterTransition = new Date("2026-09-05T00:00:00.000Z");
+    const history = [assignment({ id: "a1", businessId: "b1", employeeId: "e1", policyId: "p1", categoryId: "c1", policyVersion: 2, winningRuleId: "r-a", matchedRuleIds: ["r-a"] })];
+    let sequence = 1;
+    const repository = {
+      findAssignmentsAsOf: async (_businessId: string, _employeeId: string, asOf: Date) => history.filter((item) => item.effectiveFrom <= asOf && (!item.effectiveTo || item.effectiveTo > asOf)),
+      updateAssignment: async (assignmentId: string, update: { $set: Record<string, unknown> }) => {
+        const item = history.find((candidate) => candidate.id === assignmentId);
+        return item ? Object.assign(item, update.$set) : null;
+      },
+      createAssignment: async (payload: Record<string, unknown>) => {
+        const created = assignment({ ...payload, id: `a${++sequence}` });
+        history.push(created);
+        return created;
+      },
+      findRulesByIds: vi.fn().mockResolvedValue([]),
+    };
+    const desired = { policyId: "p1", categoryId: "c1", policyVersion: 3, source: "rule" as const, priority: 10, winningRuleId: "r-b", matchedRuleIds: ["r-b", "r-c"], conditionEvaluations: {}, manualAssignmentId: null };
+    const service = createPolicyReconciliationService({
+      repository: repository as never,
+      employeeRepository: {} as never,
+      resolver: { resolvePoliciesForEmployee: async () => ({ desiredPolicies: [desired], suppressedCandidates: [] }) } as never,
+      auditService: { record: vi.fn() } as never,
+      withTransaction: async (work) => work(null as never),
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+
+    await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: transitionAt, reason: "policy.updated", actor: { actorType: "worker" } });
+    const repeated = await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: afterTransition, reason: "periodic", actor: { actorType: "worker" } });
+    const september2 = await service.getAssignments("b1", "e1", beforeTransition);
+    const september5 = await service.getAssignments("b1", "e1", afterTransition);
+
+    expect(september2[0]).toMatchObject({ id: "a1", policyVersion: 2, winningRuleId: "r-a" });
+    expect(september5[0]).toMatchObject({ id: "a2", policyVersion: 3, winningRuleId: "r-b" });
+    expect(history[0]).toMatchObject({ effectiveTo: transitionAt, status: "ended" });
+    expect(history[1]).toMatchObject({ effectiveFrom: transitionAt, status: "active" });
+    expect(repeated.changes).toEqual([{ operation: "KEEP", policyId: "p1", assignmentId: "a2" }]);
+    expect(history).toHaveLength(2);
+    expect(history.filter((item) => item.status === "active")).toHaveLength(1);
+  });
+
+  it("does not split for matched-rule ordering alone", async () => {
+    const current = assignment({ id: "a1", policyId: "p1", categoryId: "c1", winningRuleId: "r1", matchedRuleIds: ["r2", "r1"] });
+    const createAssignment = vi.fn();
+    const updateAssignment = vi.fn();
+    const service = createPolicyReconciliationService({
+      repository: { findAssignmentsAsOf: async () => [current], createAssignment, updateAssignment } as never,
+      employeeRepository: {} as never,
+      resolver: { resolvePoliciesForEmployee: async () => ({ desiredPolicies: [{ policyId: "p1", categoryId: "c1", policyVersion: 1, source: "rule", priority: 10, winningRuleId: "r1", matchedRuleIds: ["r1", "r2"], conditionEvaluations: {}, manualAssignmentId: null }], suppressedCandidates: [] }) } as never,
+      auditService: { record: vi.fn() } as never,
+      withTransaction: async (work) => work(null as never),
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+    const result = await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: new Date(), reason: "periodic", actor: { actorType: "worker" } });
+    expect(result.changes[0]?.operation).toBe("KEEP");
+    expect(createAssignment).not.toHaveBeenCalled();
+    expect(updateAssignment).not.toHaveBeenCalled();
+  });
+
+  it("creates a replacement when only the winning rule changes", async () => {
+    const current = assignment({ id: "a1", policyId: "p1", categoryId: "c1", winningRuleId: "r1", matchedRuleIds: ["r1", "r2"] });
+    const createAssignment = vi.fn(async (payload: Record<string, unknown>) => assignment({ ...payload, id: "a2" }));
+    const service = createPolicyReconciliationService({
+      repository: {
+        findAssignmentsAsOf: async () => [current],
+        updateAssignment: async (_id: string, update: { $set: Record<string, unknown> }) => Object.assign(current, update.$set),
+        createAssignment,
+      } as never,
+      employeeRepository: {} as never,
+      resolver: { resolvePoliciesForEmployee: async () => ({ desiredPolicies: [{ policyId: "p1", categoryId: "c1", policyVersion: 1, source: "rule", priority: 10, winningRuleId: "r2", matchedRuleIds: ["r1", "r2"], conditionEvaluations: {}, manualAssignmentId: null }], suppressedCandidates: [] }) } as never,
+      auditService: { record: vi.fn() } as never,
+      withTransaction: async (work) => work(null as never),
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+    await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: new Date("2026-09-04"), reason: "rule.updated", actor: { actorType: "worker" } });
+    expect(current).toMatchObject({ winningRuleId: "r1", status: "ended" });
+    expect(createAssignment).toHaveBeenCalledWith(expect.objectContaining({ winningRuleId: "r2", status: "active" }), { session: null });
+  });
+
+  it("preserves manual assignment lifecycle while versioning its policy snapshot", async () => {
+    const current = assignment({ id: "m1", policyId: "p1", categoryId: "c1", source: "manual", policyVersion: 1, createdBy: "u1" });
+    const createAssignment = vi.fn(async (payload: Record<string, unknown>) => assignment({ ...payload, id: "m2" }));
+    const service = createPolicyReconciliationService({
+      repository: {
+        findAssignmentsAsOf: async () => [current],
+        updateAssignment: async (_id: string, update: { $set: Record<string, unknown> }) => Object.assign(current, update.$set),
+        createAssignment,
+      } as never,
+      employeeRepository: {} as never,
+      resolver: { resolvePoliciesForEmployee: async () => ({ desiredPolicies: [{ policyId: "p1", categoryId: "c1", policyVersion: 2, source: "manual", priority: null, winningRuleId: null, matchedRuleIds: [], conditionEvaluations: {}, manualAssignmentId: "m1" }], suppressedCandidates: [] }) } as never,
+      auditService: { record: vi.fn() } as never,
+      withTransaction: async (work) => work(null as never),
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+    await service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: new Date("2026-09-04"), reason: "policy.updated", actor: { actorType: "worker" } });
+    expect(current).toMatchObject({ source: "manual", policyVersion: 1, status: "ended" });
+    expect(createAssignment).toHaveBeenCalledWith(expect.objectContaining({ source: "manual", policyVersion: 2, createdBy: "u1" }), { session: null });
+  });
+
+  it("rolls back the ended interval when replacement creation fails", async () => {
+    const current = assignment({ id: "a1", policyId: "p1", categoryId: "c1", policyVersion: 2, winningRuleId: "r1", matchedRuleIds: ["r1"] });
+    const service = createPolicyReconciliationService({
+      repository: {
+        findAssignmentsAsOf: async () => [current],
+        updateAssignment: async (_id: string, update: { $set: Record<string, unknown> }) => Object.assign(current, update.$set),
+        createAssignment: async () => { throw new Error("insert failed"); },
+      } as never,
+      employeeRepository: {} as never,
+      resolver: { resolvePoliciesForEmployee: async () => ({ desiredPolicies: [{ policyId: "p1", categoryId: "c1", policyVersion: 3, source: "rule", priority: 10, winningRuleId: "r1", matchedRuleIds: ["r1"], conditionEvaluations: {}, manualAssignmentId: null }], suppressedCandidates: [] }) } as never,
+      auditService: { record: vi.fn() } as never,
+      withTransaction: async (work) => {
+        const snapshot = { ...current };
+        try { return await work(null as never); }
+        catch (error) { Object.assign(current, snapshot); throw error; }
+      },
+      createHttpError: (message, statusCode) => Object.assign(new Error(message), { statusCode }),
+    });
+    await expect(service.reconcileEmployeePolicies({ businessId: "b1", employeeId: "e1", asOfDate: new Date("2026-09-04"), reason: "policy.updated", actor: { actorType: "worker" } })).rejects.toThrow("insert failed");
+    expect(current).toMatchObject({ status: "active", effectiveTo: null, policyVersion: 2 });
   });
 
   it("adds current winning and matched rule names to assignment responses", async () => {
