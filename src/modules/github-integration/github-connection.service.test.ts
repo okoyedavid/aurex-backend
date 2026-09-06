@@ -32,6 +32,8 @@ const setup = () => {
     findIdentity: vi.fn(),
     upsertIdentity: vi.fn(),
     deleteIdentity: vi.fn(),
+    stageEmployeeGrantPrincipal: vi.fn(),
+    refreshEmployeeGrantPrincipalMetadata: vi.fn(),
     markBusinessGrantsNeedsConfiguration: vi.fn(),
   };
   const appClient = { getInstallation: vi.fn() };
@@ -63,12 +65,14 @@ const setup = () => {
   };
   const enqueue = vi.fn();
   const enqueueBusiness = vi.fn();
+  const withTransaction = async <T>(work: (session: never) => Promise<T>) => work(null as never);
   const service = createGitHubConnectionService({
     repository: repository as never,
     employeeRepository: employeeRepository as never,
     businessMemberRepository: businessMemberRepository as never,
     clientFactory: clientFactory as never,
     auditService: auditService as never,
+    withTransaction,
     createHttpError: httpError as never,
     enqueueEmployeeExternalReconciliation: enqueue,
     enqueueBusinessReconciliation: enqueueBusiness,
@@ -345,5 +349,55 @@ describe("GitHubConnectionService existing operations", () => {
     await expect(
       fixture.service.setIdentity(businessId, employeeId, "octocat", userId),
     ).resolves.toMatchObject({ verificationStatus: "verified" });
+  });
+
+  it("durably stages a principal migration before enqueueing enforcement", async () => {
+    const fixture = setup();
+    fixture.employeeRepository.findByIdAndBusiness.mockResolvedValue({ id: employeeId, fullName: "Emeka Okoye" });
+    fixture.repository.findConnection.mockResolvedValue({ status: "active", installationId: 42 });
+    fixture.repository.findIdentity.mockResolvedValue({ username: "emeka-old", externalId: 77, verificationStatus: "verified" });
+    fixture.installationClient.getUser.mockResolvedValue({ id: 88, login: "emeka-new" });
+    fixture.repository.upsertIdentity.mockResolvedValue({ username: "emeka-new", externalId: 88, verificationStatus: "verified" });
+
+    await fixture.service.setIdentity(businessId, employeeId, "emeka-new", userId);
+
+    expect(fixture.repository.stageEmployeeGrantPrincipal).toHaveBeenCalledWith(
+      businessId,
+      employeeId,
+      { externalId: 88, username: "emeka-new" },
+      { session: null },
+    );
+    expect(fixture.enqueue).toHaveBeenCalledAfter(fixture.repository.stageEmployeeGrantPrincipal);
+    expect(fixture.auditService.recordEventSafely).toHaveBeenCalledWith(expect.objectContaining({
+      summary: "Emeka Okoye's GitHub identity changed from @emeka-old to @emeka-new.",
+    }));
+  });
+
+  it("updates username metadata without staging a migration for the same GitHub user id", async () => {
+    const fixture = setup();
+    fixture.employeeRepository.findByIdAndBusiness.mockResolvedValue({ id: employeeId, fullName: "Emeka Okoye" });
+    fixture.repository.findConnection.mockResolvedValue({ status: "active", installationId: 42 });
+    fixture.repository.findIdentity.mockResolvedValue({ username: "old-login", externalId: 77, verificationStatus: "verified" });
+    fixture.installationClient.getUser.mockResolvedValue({ id: 77, login: "new-login" });
+    fixture.repository.upsertIdentity.mockResolvedValue({ username: "new-login", externalId: 77, verificationStatus: "verified" });
+
+    await fixture.service.setIdentity(businessId, employeeId, "new-login", userId);
+
+    expect(fixture.repository.refreshEmployeeGrantPrincipalMetadata).toHaveBeenCalledOnce();
+    expect(fixture.repository.stageEmployeeGrantPrincipal).not.toHaveBeenCalled();
+  });
+
+  it("stages identity removal on grants before deleting the employee mapping", async () => {
+    const fixture = setup();
+    const identity = { username: "emeka-old", externalId: 77, verificationStatus: "verified" };
+    fixture.employeeRepository.findByIdAndBusiness.mockResolvedValue({ id: employeeId, fullName: "Emeka Okoye" });
+    fixture.repository.findIdentity.mockResolvedValue(identity);
+    fixture.repository.deleteIdentity.mockResolvedValue(identity);
+
+    await fixture.service.removeIdentity(businessId, employeeId, userId);
+
+    expect(fixture.repository.stageEmployeeGrantPrincipal).toHaveBeenCalledWith(businessId, employeeId, null, { session: null });
+    expect(fixture.repository.deleteIdentity).toHaveBeenCalledAfter(fixture.repository.stageEmployeeGrantPrincipal);
+    expect(fixture.enqueue).toHaveBeenCalledAfter(fixture.repository.deleteIdentity);
   });
 });

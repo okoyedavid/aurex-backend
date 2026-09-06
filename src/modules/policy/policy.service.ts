@@ -267,7 +267,36 @@ export const createPolicyService = ({
 
   const listRules = async (businessId: string, policyId: string) => {
     await getPolicy(businessId, policyId);
-    return { items: await repository.listRules(businessId, policyId) };
+    const items = await repository.listRules(businessId, policyId);
+    const referenceIdsByField = (field: PolicyRuleCondition["field"]) =>
+      [...new Set(items.flatMap((rule) => rule.conditions
+        .filter((condition) => condition.field === field)
+        .flatMap((condition) => Array.isArray(condition.value) ? condition.value : [condition.value])
+        .map(id)))];
+    const [departments, employeeTypes, groups] = await Promise.all([
+      employeeListRepository.findEmployeeListsByBusinessAndIds(businessId, referenceIdsByField("department")),
+      employeeTypeRepository.findByBusinessAndIds(businessId, referenceIdsByField("employeeType")),
+      employeeGroupRepository.findByBusinessAndIds(businessId, referenceIdsByField("group")),
+    ]);
+    const namesById = (records: Array<{ id?: unknown; _id?: unknown; name: string }>) =>
+      new Map(records.map((record) => [id(record.id ?? record._id), record.name]));
+    const names = {
+      department: namesById(departments as never),
+      employeeType: namesById(employeeTypes as never),
+      group: namesById(groups as never),
+    };
+    const resolvedItems = items.map((rule) => ({
+      ...rule.toObject(),
+      id: rule.id,
+      conditions: rule.conditions.map((condition) => {
+        const lookup = names[condition.field as keyof typeof names];
+        if (!lookup) return condition;
+        const values = Array.isArray(condition.value) ? condition.value : [condition.value];
+        const displayValue = values.map((value) => lookup.get(id(value)) ?? "Reference unavailable");
+        return { ...condition, displayValue: Array.isArray(condition.value) ? displayValue : displayValue[0] };
+      }),
+    }));
+    return { items: resolvedItems };
   };
   const getRule = async (businessId: string, ruleId: string) => {
     const rule = await repository.findRule(businessId, ruleId);

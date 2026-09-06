@@ -4,6 +4,12 @@ export type PolicyJobContext = {
   requestedBy?: string;
   requestedAt: string;
   correlationId?: string;
+  demoRun?: {
+    runId: string;
+    sessionId: string;
+    employeeChanged: boolean;
+    suppressExternalExecution: true;
+  };
 };
 
 export type PolicyReconciliationJob =

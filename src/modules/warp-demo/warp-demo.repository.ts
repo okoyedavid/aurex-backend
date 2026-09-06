@@ -9,11 +9,14 @@ import type { PolicyStatus } from "../policy/policy.model.js";
 import { PolicyRule } from "../policy-rule/policy-rule.model.js";
 import { EmployeePolicyAssignment } from "../employee-policy-assignment/employee-policy-assignment.model.js";
 import { PolicyAudit } from "../policy-audit/policy-audit.model.js";
+import { GitHubConnection } from "../github-integration/github-connection.model.js";
+import { ExternalAccessGrant } from "../github-integration/external-access-grant.model.js";
 
 export const warpDemoRepository = {
   findBusiness: (businessId: string) => Business.findById(businessId).lean(),
   listEmployees: (businessId: string) => Employee.find({ businessId, status: { $ne: "archived" } }).sort({ fullName: 1 }).lean(),
   findEmployee: (businessId: string, employeeId: string) => Employee.findOne({ _id: employeeId, businessId, status: { $ne: "archived" } }).lean(),
+  findEmployeeByName: (businessId: string, fullName: string) => Employee.findOne({ businessId, fullName, status: { $ne: "archived" } }).lean(),
   listEmployeeLists: (businessId: string) => EmployeeList.find({ businessId }).lean(),
   listEmployeeTypes: (businessId: string) => EmployeeType.find({ businessId }).lean(),
   listEmployeeGroups: (businessId: string) => EmployeeGroup.find({ businessId }).lean(),
@@ -25,6 +28,8 @@ export const warpDemoRepository = {
   countActiveRules: (businessId: string) => PolicyRule.countDocuments({ businessId, status: "active" }),
   countActiveAssignments: (businessId: string) => EmployeePolicyAssignment.countDocuments({ businessId, status: "active" }),
   listAudit: (businessId: string, filters: { limit: number; employeeId?: string; policyId?: string; action?: string }) => PolicyAudit.find({ businessId, ...(filters.employeeId ? { employeeId: filters.employeeId } : {}), ...(filters.policyId ? { policyId: filters.policyId } : {}), ...(filters.action ? { action: filters.action } : {}) }).sort({ occurredAt: -1, _id: -1 }).limit(filters.limit).lean(),
+  findGitHubConnection: (businessId: string) => GitHubConnection.findOne({ businessId }).select("status installationId").lean(),
+  countManagedExternalGrants: (businessId: string) => ExternalAccessGrant.countDocuments({ businessId, managedByAurex: true }),
 };
 
 export type WarpDemoRepository = typeof warpDemoRepository;

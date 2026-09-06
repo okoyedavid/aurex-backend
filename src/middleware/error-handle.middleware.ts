@@ -38,7 +38,7 @@ const errorHandler = async (
   }
 
   const responseMessage =
-    isServerError && process.env.NODE_ENV === "production"
+    isServerError && process.env.NODE_ENV === "production" && !error.isOperational
       ? "Internal server error"
       : error.message || "Internal server error";
 

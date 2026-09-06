@@ -1,21 +1,31 @@
+import crypto from "node:crypto";
 import { calculateTenureMonths } from "../policy-rule/rule-evaluator.js";
 import type { PolicyResolver } from "../policy/policy-resolver.service.js";
 import type { WarpDemoRepository } from "./warp-demo.repository.js";
 import type { HttpError } from "../../utils/api-error.js";
 import type { PolicyStatus } from "../policy/policy.model.js";
+import type { EmployeeService } from "../employee/employee.service.js";
+import type { PolicyReconciliationJob } from "../../queues/policy-reconciliation.types.js";
+import type { WarpDemoProgressService } from "./warp-demo-progress.service.js";
+import { WarpDemoBusyError, WarpDemoMutationLimitError, WarpDemoRunConflictError, WarpDemoSessionExpiredError, type WarpDemoSessionStore } from "./warp-demo-session.store.js";
+import type { WarpDemoMutation } from "./warp-demo.validators.js";
 
 type Dependencies = {
   repository: WarpDemoRepository;
   resolver: PolicyResolver;
   businessId?: string;
   createHttpError: (message: string, statusCode: number) => HttpError;
+  employeeService: EmployeeService;
+  sessionStore: WarpDemoSessionStore;
+  progressService: WarpDemoProgressService;
+  enqueueReconciliation: (job: PolicyReconciliationJob) => Promise<unknown>;
 };
 
 type Doc = Record<string, any>;
 const id = (value: unknown) => String(value);
 const iso = (value: unknown) => value instanceof Date ? value.toISOString() : value ? new Date(String(value)).toISOString() : null;
 
-export const createWarpDemoService = ({ repository, resolver, businessId, createHttpError }: Dependencies) => {
+export const createWarpDemoService = ({ repository, resolver, businessId, createHttpError, employeeService, sessionStore, progressService, enqueueReconciliation }: Dependencies) => {
   const configuredBusiness = async () => {
     if (!businessId) throw createHttpError("Warp demo is not configured", 503);
     const business = await repository.findBusiness(businessId);
@@ -195,7 +205,168 @@ export const createWarpDemoService = ({ repository, resolver, businessId, create
     }) };
   };
 
-  return { overview, employees, employee, employeePolicies, explain, categories, policies, policy, audit };
+  const publicEmployee = (value: ReturnType<typeof employeeDto>) => {
+    const { id: _internalId, ...safe } = value;
+    return { alias: "maya" as const, ...safe };
+  };
+
+  const requireMutableDemo = async () => {
+    await configuredBusiness();
+    const [connection, managedGrantCount] = await Promise.all([
+      repository.findGitHubConnection(businessId!),
+      repository.countManagedExternalGrants(businessId!),
+    ]);
+    if ((connection?.status === "active" && connection.installationId) || managedGrantCount > 0) {
+      throw createHttpError("The live demo is temporarily unavailable.", 503);
+    }
+  };
+
+  const scenario = async () => {
+    await requireMutableDemo();
+    const [employee, lists, types, groups] = await Promise.all([
+      repository.findEmployeeByName(businessId!, "Maya Patel"),
+      repository.listEmployeeLists(businessId!),
+      repository.listEmployeeTypes(businessId!),
+      repository.listEmployeeGroups(businessId!),
+    ]);
+    const byName = (items: Doc[]) => new Map(items.map((item) => [item.name, id(item._id)]));
+    const departments = byName(lists as Doc[]);
+    const employeeTypes = byName(types as Doc[]);
+    const groupIds = byName(groups as Doc[]);
+    if (!employee || !departments.has("Engineering") || !departments.has("Finance") || !employeeTypes.has("Full Time") || !employeeTypes.has("Contractor") || !groupIds.has("Remote")) {
+      throw createHttpError("The live demo is temporarily unavailable.", 503);
+    }
+    return { employee: employee as Doc, departments, employeeTypes, remoteGroupId: groupIds.get("Remote")! };
+  };
+
+  const publicSessionError = (error: unknown): never => {
+    if (error instanceof WarpDemoSessionExpiredError) throw createHttpError(error.message, 410);
+    if (error instanceof WarpDemoRunConflictError) throw createHttpError(error.message, 409);
+    if (error instanceof WarpDemoMutationLimitError) throw createHttpError(error.message, 429);
+    if (error instanceof WarpDemoBusyError) throw createHttpError(error.message, 423);
+    throw error;
+  };
+
+  const queueScenarioChange = async ({ sessionId, updates, description, reason, countMutation }: { sessionId: string; updates: Record<string, unknown>; description: string; reason: string; countMutation: boolean }) => {
+    const runId = crypto.randomUUID();
+    try {
+      await sessionStore.claimRun(sessionId, runId, countMutation);
+    } catch (error) {
+      return publicSessionError(error);
+    }
+    try {
+      await progressService.createRun({ runId, sessionId });
+      const current = await scenario();
+      const comparable = (value: unknown) => Array.isArray(value) ? value.map(id).sort() : value === null || value === undefined ? value : id(value);
+      const employeeChanged = Object.entries(updates).some(([field, value]) => JSON.stringify(comparable(current.employee[field])) !== JSON.stringify(comparable(value)));
+      await employeeService.updateBusinessEmployee({ businessId: businessId!, employeeId: id(current.employee._id), updates, deferPolicyReconciliation: true });
+      await progressService.appendEvent(runId, { stage: "employee_update", status: "success", title: employeeChanged ? "Employee updated" : "Employee already at requested state", description: employeeChanged ? description : "The employee facts already matched the requested demo state." }, "employee-updated");
+      await progressService.appendEvent(runId, { stage: "queued", status: "pending", title: "Reconciliation queued", description: "The real Aurex policy reconciliation pipeline will process this change." }, "queued");
+      const queued = await enqueueReconciliation({
+        type: "RECONCILE_EMPLOYEE",
+        businessId: businessId!,
+        employeeId: id(current.employee._id),
+        reason: `warp_demo.${reason}`,
+        requestedAt: new Date().toISOString(),
+        correlationId: runId,
+        demoRun: { runId, sessionId, employeeChanged, suppressExternalExecution: true },
+      });
+      if (!queued) throw new Error("Demo reconciliation queue is unavailable");
+      return { runId, status: "queued" as const };
+    } catch (error) {
+      console.error("Warp demo reconciliation could not be queued", { runId, error: error instanceof Error ? error.message : "unknown" });
+      await progressService.appendEvent(runId, { stage: "complete", status: "failed", title: "Reconciliation could not be completed", description: "Reset the demo scenario and try again." }, "run-failed").catch(() => undefined);
+      await progressService.markFailed(runId).catch(() => undefined);
+      await sessionStore.finishRun(sessionId, runId).catch(() => undefined);
+      throw createHttpError("Reconciliation could not be started. Reset the scenario and try again.", 503);
+    }
+  };
+
+  const baselineUpdates = async () => {
+    const current = await scenario();
+    return {
+      employeeListId: current.departments.get("Engineering")!,
+      employeeTypeId: current.employeeTypes.get("Full Time")!,
+      state: "California",
+      groupIds: [current.remoteGroupId],
+    };
+  };
+
+  const createSession = async () => {
+    await requireMutableDemo();
+    let session;
+    try { session = await sessionStore.createSession(); }
+    catch (error) { return publicSessionError(error); }
+    try {
+      const initialization = await queueScenarioChange({ sessionId: session.id, updates: await baselineUpdates(), description: "Maya Patel was reset to Engineering, Full Time, California, with Remote membership.", reason: "session_initialized", countMutation: false });
+      const current = await scenario();
+      const lookup = await dimensions();
+      const refreshed = await repository.findEmployee(businessId!, id(current.employee._id));
+      return {
+        sessionId: session.id,
+        expiresAt: session.expiresAt,
+        employee: publicEmployee(employeeDto(refreshed as Doc, lookup)),
+        initialization,
+        controls: {
+          department: ["engineering", "finance"],
+          employeeType: ["full_time", "contractor"],
+          state: ["california", "new_york"],
+          remoteGroup: ["member", "not_member"],
+        },
+      };
+    } catch (error) {
+      await sessionStore.closeSession(session.id).catch(() => undefined);
+      throw error;
+    }
+  };
+
+  const mutate = async (sessionId: string, mutation: WarpDemoMutation) => {
+    try { await sessionStore.getSession(sessionId); }
+    catch (error) { return publicSessionError(error); }
+    const current = await scenario();
+    const lookup = await dimensions();
+    const before = employeeDto(current.employee, lookup);
+    let updates: Record<string, unknown>;
+    let description: string;
+    if (mutation.field === "department") {
+      const name = mutation.value === "engineering" ? "Engineering" : "Finance";
+      updates = { employeeListId: current.departments.get(name)! };
+      description = `Department changed from ${before.department} to ${name}.`;
+    } else if (mutation.field === "employeeType") {
+      const name = mutation.value === "full_time" ? "Full Time" : "Contractor";
+      updates = { employeeTypeId: current.employeeTypes.get(name)! };
+      description = `Employee type changed from ${before.employeeType ?? "Unassigned"} to ${name}.`;
+    } else if (mutation.field === "state") {
+      const name = mutation.value === "california" ? "California" : "New York";
+      updates = { state: name };
+      description = `State changed from ${before.state ?? "Unassigned"} to ${name}.`;
+    } else {
+      const existing = (current.employee.groupIds ?? []).map(id).filter((groupId: string) => groupId !== current.remoteGroupId);
+      const member = mutation.value === "member";
+      updates = { groupIds: member ? [...existing, current.remoteGroupId] : existing };
+      description = member ? "Maya Patel joined the Remote group." : "Maya Patel left the Remote group.";
+    }
+    return queueScenarioChange({ sessionId, updates, description, reason: `${mutation.field}_changed`, countMutation: true });
+  };
+
+  const reset = async (sessionId: string) => {
+    try { await sessionStore.getSession(sessionId); }
+    catch (error) { return publicSessionError(error); }
+    const run = await queueScenarioChange({ sessionId, updates: await baselineUpdates(), description: "Maya Patel was reset to Engineering, Full Time, California, with Remote membership.", reason: "reset", countMutation: true });
+    const current = await scenario();
+    const lookup = await dimensions();
+    return { ...run, employee: publicEmployee(employeeDto(current.employee, lookup)) };
+  };
+
+  const reconciliationRun = async (sessionId: string, runId: string) => {
+    try { await sessionStore.getSession(sessionId); }
+    catch (error) { return publicSessionError(error); }
+    const run = await progressService.getRun(sessionId, runId);
+    if (!run) throw createHttpError("Reconciliation run not found.", 404);
+    return run;
+  };
+
+  return { overview, employees, employee, employeePolicies, explain, categories, policies, policy, audit, createSession, mutate, reconciliationRun, reset };
 };
 
 export type WarpDemoService = ReturnType<typeof createWarpDemoService>;

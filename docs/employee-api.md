@@ -82,3 +82,12 @@ GET /api/businesses/:businessId/employees/:employeeId/policies
 GET /api/businesses/:businessId/employees/:employeeId/policies/explain
 GET /api/businesses/:businessId/employees/:employeeId/policy-history
 ```
+
+Employee policy assignment responses include `winningRule` and `matchedRules`
+with human-readable rule names. Policy explanation responses also include
+`expectedDisplayValue` and `actualDisplayValue` on each condition evaluation.
+Department, employee-type, and group references are resolved to their names in
+those display fields; the underlying IDs remain available only in the
+machine-oriented fields for API consumers. Explanation rule entries also
+include `ruleName`, and resolved automatic policies include
+`winningRuleName`/`matchedRuleNames`.

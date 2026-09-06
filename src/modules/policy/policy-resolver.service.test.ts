@@ -11,9 +11,9 @@ const resolverFor = ({ cardinality = "ONE", rules = [], manuals = [], employeeOv
   const currentEmployee = document({ ...employee, ...employeeOverrides });
   return createPolicyResolver({
   employeeRepository: { findByIdAndBusiness: async () => currentEmployee } as never,
-  employeeListRepository: { findEmployeeListByBusinessAndId: async (_businessId: string, listId: string) => ({ id: listId, status: "active" }) } as never,
-  employeeTypeRepository: { findActiveByBusinessAndId: async (_businessId: string, typeId: string) => ({ id: typeId }) } as never,
-  employeeGroupRepository: { findActiveByBusinessAndIds: async (_businessId: string, ids: string[]) => ids.map((id) => ({ id })) } as never,
+  employeeListRepository: { findEmployeeListByBusinessAndId: async (_businessId: string, listId: string) => ({ id: listId, name: "Engineering", status: "active" }) } as never,
+  employeeTypeRepository: { findActiveByBusinessAndId: async (_businessId: string, typeId: string) => ({ id: typeId, name: "Full Time" }) } as never,
+  employeeGroupRepository: { findActiveByBusinessAndIds: async (_businessId: string, ids: string[]) => ids.map((id) => ({ id, name: "Remote" })) } as never,
   policyRepository: {
     findEffectiveRules: async () => rules,
     findAssignmentsAsOf: async () => manuals,
@@ -73,6 +73,25 @@ describe("policy resolver", () => {
     expect(result.desiredPolicies).toHaveLength(0);
     expect(result.evaluatedRules[0]).toMatchObject({ ruleId: "r1", matched: false });
     expect(result.evaluatedRules[0]?.conditions[0]).toMatchObject({ actualValue: "CA", matched: false });
+  });
+
+  it("resolves employee reference conditions to names for explanation output", async () => {
+    const customRule = document({
+      ...rule("r1", "p1", 10),
+      conditions: [
+        { field: "employeeType", operator: "equals", value: "t1" },
+        { field: "group", operator: "contains", value: "g1" },
+      ],
+    });
+    const result = await resolverFor({ rules: [customRule] }).resolvePoliciesForEmployee({
+      businessId: "b1",
+      employeeId: "e1",
+      asOfDate: new Date(),
+    });
+    expect(result.evaluatedRules[0]?.conditions).toEqual([
+      expect.objectContaining({ expectedDisplayValue: "Full Time" }),
+      expect.objectContaining({ expectedDisplayValue: "Remote" }),
+    ]);
   });
 
   it("returns no desired assignments for an archived employee", async () => {

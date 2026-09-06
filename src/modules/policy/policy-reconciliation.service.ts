@@ -49,7 +49,7 @@ export const createPolicyReconciliationService = ({
       const current = await repository.findAssignmentsAsOf(businessId, employeeId, asOfDate, { session });
       const currentByPolicy = new Map(current.map((assignment) => [id(assignment.policyId), assignment]));
       const desiredIds = new Set(resolution.desiredPolicies.map((candidate) => candidate.policyId));
-      const changes: Array<{ operation: "KEEP" | "CREATE" | "END" | "UPDATE_VERSION"; policyId: string; assignmentId: string }> = [];
+      const changes: Array<{ operation: "KEEP" | "CREATE" | "END" | "UPDATE_VERSION"; policyId: string; assignmentId: string; previousAssignmentId?: string }> = [];
 
       for (const desired of resolution.desiredPolicies) {
         const existing = currentByPolicy.get(desired.policyId);
@@ -67,17 +67,28 @@ export const createPolicyReconciliationService = ({
             continue;
           }
           const before = existing.toObject();
-          const updated = await repository.updateAssignment(existing.id, { $set: {
-            policyVersion: desired.policyVersion,
+          const ended = await repository.updateAssignment(existing.id, { $set: {
+            status: "ended",
+            effectiveTo: asOfDate,
+            resolvedAt: asOfDate,
+          } }, { session });
+          if (!ended) throw new Error("Assignment disappeared during reconciliation");
+          const replacement = await repository.createAssignment({
+            businessId,
+            employeeId,
+            policyId: desired.policyId,
             categoryId: desired.categoryId,
+            policyVersion: desired.policyVersion,
             source: desired.source,
             winningRuleId: desired.winningRuleId,
             matchedRuleIds: desired.matchedRuleIds,
+            status: "active",
+            effectiveFrom: asOfDate,
             resolvedAt: asOfDate,
-          } }, { session });
-          if (!updated) throw new Error("Assignment disappeared during reconciliation");
-          await auditService.record({ ...actor, businessId, entityType: "employee_policy_assignment", entityId: updated.id, employeeId, policyId: desired.policyId, policyRuleId: desired.winningRuleId ?? undefined, categoryId: desired.categoryId, action: "ASSIGNMENT_VERSION_UPDATED", before, after: updated.toObject(), changedFields: ["policyVersion", "categoryId", "source", "winningRuleId", "matchedRuleIds", "resolvedAt"], reason, correlationId, reconciliationRunId, metadata: { conditionEvaluations: desired.conditionEvaluations, triggeredByUserId } }, session);
-          changes.push({ operation: "UPDATE_VERSION", policyId: desired.policyId, assignmentId: updated.id });
+            ...(existing.createdBy ? { createdBy: existing.createdBy } : {}),
+          }, { session });
+          await auditService.record({ ...actor, businessId, entityType: desired.source === "manual" ? "manual_assignment" : "employee_policy_assignment", entityId: replacement.id, employeeId, policyId: desired.policyId, policyRuleId: desired.winningRuleId ?? undefined, categoryId: desired.categoryId, action: "ASSIGNMENT_VERSION_UPDATED", before, after: replacement.toObject(), changedFields: ["policyVersion", "categoryId", "source", "winningRuleId", "matchedRuleIds", "status", "effectiveFrom", "effectiveTo", "resolvedAt"], reason, correlationId, reconciliationRunId, metadata: { previousAssignmentId: existing.id, conditionEvaluations: desired.conditionEvaluations, triggeredByUserId } }, session);
+          changes.push({ operation: "UPDATE_VERSION", policyId: desired.policyId, assignmentId: replacement.id, previousAssignmentId: existing.id });
           continue;
         }
 
@@ -108,7 +119,7 @@ export const createPolicyReconciliationService = ({
       return changes;
     });
 
-    console.info("Policy reconciliation completed", { businessId, employeeId, reconciliationRunId, reason, assignmentsCreated: result.filter((item) => item.operation === "CREATE").length, assignmentsEnded: result.filter((item) => item.operation === "END").length });
+    console.info("Policy reconciliation completed", { businessId, employeeId, reconciliationRunId, reason, assignmentsCreated: result.filter((item) => item.operation === "CREATE" || item.operation === "UPDATE_VERSION").length, assignmentsEnded: result.filter((item) => item.operation === "END" || item.operation === "UPDATE_VERSION").length });
     return { resolution, reconciliationRunId, changes: result };
   };
 

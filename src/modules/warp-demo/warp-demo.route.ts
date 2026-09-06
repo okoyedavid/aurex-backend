@@ -1,6 +1,6 @@
 import { Router, type RequestHandler } from "express";
 import { validate } from "../../middleware/validate-middleware.js";
-import { warpDemoLimiter } from "../../middleware/rate-limit.middleware.js";
+import { warpDemoLimiter, warpDemoMutationLimiter, warpDemoSessionLimiter } from "../../middleware/rate-limit.middleware.js";
 import { warpDemoController } from "./warp-demo.module.js";
 import * as schemas from "./warp-demo.validators.js";
 
@@ -9,9 +9,15 @@ type Controller = typeof warpDemoController;
 export const createWarpDemoRouter = (
   controller: Controller,
   limiter: RequestHandler,
+  sessionLimiter: RequestHandler = limiter,
+  mutationLimiter: RequestHandler = limiter,
 ) => {
   const router = Router();
   router.use(limiter);
+  router.post("/session", sessionLimiter, validate(schemas.createSessionRequest), controller.createSession);
+  router.post("/session/:sessionId/mutations", mutationLimiter, validate(schemas.mutationRequest), controller.mutate);
+  router.post("/session/:sessionId/reset", mutationLimiter, validate(schemas.resetRequest), controller.reset);
+  router.get("/session/:sessionId/reconciliation/:runId", validate(schemas.reconciliationRunRequest), controller.reconciliationRun);
   router.get("/overview", validate(schemas.emptyRequest), controller.overview);
   router.get("/employees", validate(schemas.emptyRequest), controller.employees);
   router.get("/employees/:employeeId", validate(schemas.employeeRequest), controller.employee);
@@ -24,4 +30,4 @@ export const createWarpDemoRouter = (
   return router;
 };
 
-export const warpDemoRouter = createWarpDemoRouter(warpDemoController, warpDemoLimiter);
+export const warpDemoRouter = createWarpDemoRouter(warpDemoController, warpDemoLimiter, warpDemoSessionLimiter, warpDemoMutationLimiter);

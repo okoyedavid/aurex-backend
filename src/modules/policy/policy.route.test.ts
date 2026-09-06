@@ -74,6 +74,9 @@ describe("policy assignment routes", () => {
     expect(explanation.status).toBe(200);
     expect(explanation.body.data.desiredPolicies).toHaveLength(1);
     expect(explanation.body.data.desiredPolicies[0]).toMatchObject({ policyId, priority: 20, source: "rule" });
+    expect(explanation.body.data.evaluatedRules[0].conditions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ expectedDisplayValue: "Engineering" }),
+    ]));
 
     const first = await policyReconciliationService.reconcileEmployeePolicies({ businessId, employeeId, asOfDate: new Date(), reason: "integration_test", actor: { actorType: "worker" }, triggeredByUserId: userId });
     expect(first.changes.some((change) => change.operation === "CREATE")).toBe(true);

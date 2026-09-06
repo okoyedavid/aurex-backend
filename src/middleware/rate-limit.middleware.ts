@@ -143,6 +143,20 @@ const warpDemoLimiter = createLimiter({
   message: "Too many Warp demo requests. Try again later.",
 });
 
+const warpDemoSessionLimiter = createLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: 5,
+  keyGenerator: (req: Request) => getRequestMetadata(req).ipAddress ?? "unknown-ip",
+  message: "Too many demo sessions. Try again later.",
+});
+
+const warpDemoMutationLimiter = createLimiter({
+  windowMs: 10 * 60 * 1000,
+  limit: 30,
+  keyGenerator: (req: Request) => getRequestMetadata(req).ipAddress ?? "unknown-ip",
+  message: "Too many demo changes. Try again later.",
+});
+
 export {
   emailDeliveryLimiter,
   globalLimiter,
@@ -151,5 +165,7 @@ export {
   otpLimiter,
   refreshLimiter,
   sensitiveActionLimiter,
+  warpDemoMutationLimiter,
   warpDemoLimiter,
+  warpDemoSessionLimiter,
 };

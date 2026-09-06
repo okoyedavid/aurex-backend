@@ -14,7 +14,9 @@ export type ResolvedPolicy = {
   source: "rule" | "manual";
   priority: number | null;
   winningRuleId: string | null;
+  winningRuleName: string | null;
   matchedRuleIds: string[];
+  matchedRuleNames: string[];
   conditionEvaluations: Record<string, ConditionEvaluation[]>;
   manualAssignmentId: string | null;
 };
@@ -33,6 +35,8 @@ type Dependencies = {
 };
 
 const id = (value: unknown) => String(value);
+
+type DisplayValue = string | string[] | number | null;
 
 export const createPolicyResolver = ({
   employeeRepository,
@@ -104,9 +108,40 @@ export const createPolicyResolver = ({
       employmentStartDate: employee.employmentStartDate ?? null,
     };
 
+    const groupNames = new Map(activeGroups.map((group) => [group.id, group.name]));
+    const referenceName = (field: string, referenceId: string) => {
+      if (field === "department") return activeDepartment?.name ?? "Unknown department";
+      if (field === "employeeType") return activeEmployeeType?.name ?? "Unknown employee type";
+      if (field === "group") return groupNames.get(referenceId) ?? "Unknown group";
+      return referenceId;
+    };
+    const displayValue = (field: string, value: unknown): DisplayValue => {
+      if (value === null || value === undefined) return null;
+      if (Array.isArray(value)) {
+        return value.map((item) => referenceName(field, id(item)));
+      }
+      if (["department", "employeeType", "group"].includes(field)) {
+        return referenceName(field, id(value));
+      }
+      return typeof value === "number" ? value : String(value);
+    };
+    const displayConditions = (conditions: ConditionEvaluation[]) =>
+      conditions.map((evaluation) => ({
+        ...evaluation,
+        expectedDisplayValue: displayValue(
+          evaluation.condition.field,
+          evaluation.condition.value,
+        ),
+        actualDisplayValue: displayValue(
+          evaluation.condition.field,
+          evaluation.actualValue,
+        ),
+      }));
+
     const automaticByPolicy = new Map<string, ResolvedPolicy>();
     const evaluatedRules: Array<{
       ruleId: string;
+      ruleName: string | null;
       policyId: string;
       priority: number;
       matched: boolean;
@@ -120,12 +155,14 @@ export const createPolicyResolver = ({
         conditions: rule.conditions as PolicyRuleCondition[],
         evaluationDate: asOfDate,
       });
+      const conditions = displayConditions(evaluation.conditions);
       evaluatedRules.push({
         ruleId: rule.id,
+        ruleName: rule.name ?? null,
         policyId: policy.id,
         priority: rule.priority,
         matched: evaluation.matched,
-        conditions: evaluation.conditions,
+        conditions,
       });
       if (!evaluation.matched) continue;
 
@@ -140,19 +177,23 @@ export const createPolicyResolver = ({
           source: "rule",
           priority: rule.priority,
           winningRuleId: ruleId,
+          winningRuleName: rule.name ?? null,
           matchedRuleIds: [ruleId],
-          conditionEvaluations: { [ruleId]: evaluation.conditions },
+          matchedRuleNames: [rule.name ?? "Unnamed rule"],
+          conditionEvaluations: { [ruleId]: conditions },
           manualAssignmentId: null,
         });
       } else {
         existing.matchedRuleIds.push(ruleId);
-        existing.conditionEvaluations[ruleId] = evaluation.conditions;
+        existing.matchedRuleNames.push(rule.name ?? "Unnamed rule");
+        existing.conditionEvaluations[ruleId] = conditions;
         const wins =
           rule.priority > (existing.priority ?? -1) ||
           (rule.priority === existing.priority && ruleId.localeCompare(existing.winningRuleId ?? "") < 0);
         if (wins) {
           existing.priority = rule.priority;
           existing.winningRuleId = ruleId;
+          existing.winningRuleName = rule.name ?? null;
         }
       }
     }
@@ -167,7 +208,9 @@ export const createPolicyResolver = ({
         source: "manual" as const,
         priority: null,
         winningRuleId: null,
+        winningRuleName: null,
         matchedRuleIds: [],
+        matchedRuleNames: [],
         conditionEvaluations: {},
         manualAssignmentId: assignment.id,
       }];
@@ -175,6 +218,7 @@ export const createPolicyResolver = ({
 
     for (const candidate of automaticByPolicy.values()) {
       candidate.matchedRuleIds.sort((a, b) => a.localeCompare(b));
+      candidate.matchedRuleNames.sort((a, b) => a.localeCompare(b));
     }
 
     const allByCategory = new Map<string, { manual: ResolvedPolicy[]; automatic: ResolvedPolicy[] }>();

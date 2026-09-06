@@ -19,4 +19,11 @@ describe("Warp demo public request validation", () => {
   it("rejects an audit limit below 1", () => expect(() => schemas.auditRequest.parse({ params: {}, query: { limit: 0 }, body: {} })).toThrow());
   it("rejects unknown audit query keys", () => expect(() => schemas.auditRequest.parse({ params: {}, query: { raw: "true" }, body: {} })).toThrow());
   it("accepts safe audit filters", () => expect(schemas.auditRequest.parse({ params: {}, query: { employeeId: objectId, policyId: objectId, action: "ASSIGNMENT_CREATED" }, body: {} }).query).toMatchObject({ employeeId: objectId, policyId: objectId, action: "ASSIGNMENT_CREATED" }));
+  it("accepts only the safe mutation union", () => expect(schemas.mutationRequest.parse({ params: { sessionId: "a".repeat(43) }, query: {}, body: { employee: "maya", field: "department", value: "finance" } }).body).toEqual({ employee: "maya", field: "department", value: "finance" }));
+  it("rejects unsupported mutation values", () => expect(() => schemas.mutationRequest.parse({ params: { sessionId: "a".repeat(43) }, query: {}, body: { employee: "maya", field: "department", value: "legal" } })).toThrow());
+  it("rejects unsupported fields and generic update objects", () => {
+    expect(() => schemas.mutationRequest.parse({ params: { sessionId: "a".repeat(43) }, query: {}, body: { employee: "maya", field: "role", value: "owner" } })).toThrow();
+    expect(() => schemas.mutationRequest.parse({ params: { sessionId: "a".repeat(43) }, query: {}, body: { employee: "maya", updates: { state: "anything" } } })).toThrow();
+  });
+  it("rejects arbitrary employee identifiers", () => expect(() => schemas.mutationRequest.parse({ params: { sessionId: "a".repeat(43) }, query: {}, body: { employee: objectId, field: "department", value: "finance" } })).toThrow());
 });

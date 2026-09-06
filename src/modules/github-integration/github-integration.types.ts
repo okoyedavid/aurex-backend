@@ -19,6 +19,10 @@ export type GitHubRepositoryTarget = {
 
 export type GitHubTarget = GitHubTeamTarget | GitHubRepositoryTarget;
 export type DesiredAccessState = "granted" | "revoked";
+export type GitHubPrincipalSnapshot = {
+  externalId: number | null;
+  username: string;
+};
 export type ActualAccessState =
   | "unknown"
   | "pending"
