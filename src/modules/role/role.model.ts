@@ -100,7 +100,12 @@ export const systemRolePermissions = {
     "employees:view",
   ],
 
-  employee: ["employees:view_own"],
+  employee: [
+    "employees:view_own",
+    "members:view",
+    "employee_lists:view",
+    "reports:view",
+  ],
   contributor: ["payments:create", "members:view", "payments:view_own"],
   viewer: ["payments:view", "invoices:view", "members:view", "reports:view"],
 } satisfies Record<string, Permission[]>;
