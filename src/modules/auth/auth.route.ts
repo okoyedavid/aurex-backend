@@ -10,6 +10,7 @@ import {
   refreshSchema,
   verifyEmailSchema,
   logoutSchema,
+  googleCallbackSchema,
 } from "./auth.validators.js";
 import {
   emailDeliveryLimiter,
@@ -30,6 +31,13 @@ authRouter.post(
   loginIdentityLimiter,
   validate(loginSchema),
   authController.login,
+);
+
+authRouter.get("/google", loginIpLimiter, authController.google);
+authRouter.get(
+  "/google/callback",
+  validate(googleCallbackSchema),
+  authController.googleCallback,
 );
 authRouter.post("/register", validate(registerSchema), authController.register);
 
@@ -70,8 +78,6 @@ authRouter.patch(
   authController.resetPassword,
 );
 
-// authRouter.get("/google", redirectToGoogle);
-// authRouter.get("/google/callback", loginWithGoogleCallback);
 // authRouter.get("/github", redirectToGitHub);
 // authRouter.get("/github/callback", loginWithGitHub);
 

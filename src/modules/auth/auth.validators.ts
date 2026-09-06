@@ -51,6 +51,17 @@ const googleLoginSchema = z.object({
   query: z.object({}),
 });
 
+const googleCallbackSchema = z.object({
+  // OAuth callbacks are GET requests and normally have no request body.
+  body: z.object({}).optional().default({}),
+  params: z.object({}),
+  query: z.object({
+    code: z.string().trim().min(1).optional(),
+    state: z.string().trim().min(1).optional(),
+    error: z.string().trim().min(1).optional(),
+  }),
+});
+
 const resendEmailSchema = z.object({
   body: z.object({
     email: z.string().trim().toLowerCase().email(),
@@ -133,6 +144,7 @@ const logoutSchema = z.object({
 export {
   forgotPasswordSchema,
   googleLoginSchema,
+  googleCallbackSchema,
   loginSchema,
   logoutSchema,
   refreshSchema,

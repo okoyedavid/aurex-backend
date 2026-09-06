@@ -1,38 +1,12 @@
-import type { EmployeeRepository } from "../employee/employee.repository.js";
 import type { PolicyRuleCondition } from "../policy-rule/policy-rule.model.js";
 import { evaluateRule, type ConditionEvaluation } from "../policy-rule/rule-evaluator.js";
-import type { HttpError } from "../../utils/api-error.js";
-import type { PolicyRepository } from "./policy.repository.js";
-import type { EmployeeListRepository } from "../employee-list/employee-list.repository.js";
-import type { EmployeeTypeRepository } from "../employee-type/employee-type.repository.js";
-import type { EmployeeGroupRepository } from "../employee-group/employee-group.repository.js";
-
-export type ResolvedPolicy = {
-  policyId: string;
-  categoryId: string;
-  policyVersion: number;
-  source: "rule" | "manual";
-  priority: number | null;
-  winningRuleId: string | null;
-  winningRuleName: string | null;
-  matchedRuleIds: string[];
-  matchedRuleNames: string[];
-  conditionEvaluations: Record<string, ConditionEvaluation[]>;
-  manualAssignmentId: string | null;
-};
-
-export type SuppressedPolicyCandidate = ResolvedPolicy & {
-  reason: "category_cardinality" | "manual_override";
-};
-
-type Dependencies = {
-  employeeRepository: EmployeeRepository;
-  policyRepository: PolicyRepository;
-  employeeListRepository: EmployeeListRepository;
-  employeeTypeRepository: EmployeeTypeRepository;
-  employeeGroupRepository: EmployeeGroupRepository;
-  createHttpError: (message: string, statusCode: number) => HttpError;
-};
+import type {
+  PolicyResolverDependencies,
+  PolicyResolution,
+  ResolvedPolicy,
+  SuppressedPolicyCandidate,
+} from "./policy-resolver.types.js";
+export type { PolicyResolution, ResolvedPolicy, SuppressedPolicyCandidate } from "./policy-resolver.types.js";
 
 const id = (value: unknown) => String(value);
 
@@ -45,7 +19,7 @@ export const createPolicyResolver = ({
   employeeTypeRepository,
   employeeGroupRepository,
   createHttpError,
-}: Dependencies) => {
+}: PolicyResolverDependencies) => {
   const resolvePoliciesForEmployee = async ({
     businessId,
     employeeId,
@@ -54,7 +28,7 @@ export const createPolicyResolver = ({
     businessId: string;
     employeeId: string;
     asOfDate: Date;
-  }) => {
+  }): Promise<PolicyResolution> => {
     const employee = await employeeRepository.findByIdAndBusiness(employeeId, businessId);
     if (!employee) throw createHttpError("Employee not found in this business", 404);
     if (employee.status === "archived") {

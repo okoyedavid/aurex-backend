@@ -1,21 +1,13 @@
 import crypto from "node:crypto";
-import type { WithTransaction } from "../../utils/mongooose-transactions.js";
-import type { HttpError } from "../../utils/api-error.js";
-import type { PolicyAuditActor, PolicyAuditService } from "../policy-audit/policy-audit.service.js";
-import type { EmployeeRepository } from "../employee/employee.repository.js";
-import type { PolicyRepository } from "./policy.repository.js";
 import type { PolicyResolver } from "./policy-resolver.service.js";
 import { isEffectiveAt } from "./policy-effective.js";
 import { planAssignmentTransitions, type AssignmentSnapshot } from "./policy-assignment-transition.js";
-
-type Dependencies = {
-  repository: PolicyRepository;
-  employeeRepository: EmployeeRepository;
-  resolver: PolicyResolver;
-  auditService: PolicyAuditService;
-  withTransaction: WithTransaction;
-  createHttpError: (message: string, statusCode: number) => HttpError;
-};
+import type {
+  CreateManualAssignmentInput,
+  EndManualAssignmentInput,
+  PolicyReconciliationDependencies,
+  ReconcileEmployeePoliciesInput,
+} from "./policy-reconciliation.types.js";
 
 const id = (value: unknown) => String(value);
 
@@ -26,7 +18,7 @@ export const createPolicyReconciliationService = ({
   auditService,
   withTransaction,
   createHttpError,
-}: Dependencies) => {
+}: PolicyReconciliationDependencies) => {
   const reconcileEmployeePolicies = async ({
     businessId,
     employeeId,
@@ -35,15 +27,7 @@ export const createPolicyReconciliationService = ({
     actor,
     correlationId,
     triggeredByUserId,
-  }: {
-    businessId: string;
-    employeeId: string;
-    asOfDate: Date;
-    reason: string;
-    actor: PolicyAuditActor;
-    correlationId?: string;
-    triggeredByUserId?: string;
-  }) => {
+  }: ReconcileEmployeePoliciesInput) => {
     const resolution = await resolver.resolvePoliciesForEmployee({ businessId, employeeId, asOfDate });
     const reconciliationRunId = crypto.randomUUID();
     const result = await withTransaction(async (session) => {
@@ -94,7 +78,7 @@ export const createPolicyReconciliationService = ({
     return { resolution, reconciliationRunId, changes: result };
   };
 
-  const createManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveFrom }: { businessId: string; employeeId: string; policyId: string; userId: string; businessMemberId: string; effectiveFrom: Date }) => {
+  const createManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveFrom }: CreateManualAssignmentInput) => {
     const [employee, policy] = await Promise.all([
       employeeRepository.findByIdAndBusiness(employeeId, businessId),
       repository.findPolicy(businessId, policyId),
@@ -130,7 +114,7 @@ export const createPolicyReconciliationService = ({
     return { assignment, created: true };
   };
 
-  const endManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveTo }: { businessId: string; employeeId: string; policyId: string; userId: string; businessMemberId: string; effectiveTo: Date }) => {
+  const endManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveTo }: EndManualAssignmentInput) => {
     const existing = await repository.findActiveManualAssignment(businessId, employeeId, policyId);
     if (!existing) throw createHttpError("Active manual assignment not found", 404);
     const assignment = await withTransaction(async (session) => {

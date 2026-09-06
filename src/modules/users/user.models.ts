@@ -38,6 +38,11 @@ const userSchema = new mongoose.Schema(
       lowercase: true,
       trim: true,
     },
+    googleId: {
+      type: String,
+      required: false,
+      trim: true,
+    },
 
     emailVerifiedAt: {
       type: Date,
@@ -90,12 +95,15 @@ userSchema.index(
   },
 );
 
+userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
+
 export type UserSchemaType = {
   name: string;
   avatar?: string | null;
   bio?: string | null;
   username?: string | null;
   email: string;
+  googleId?: string | null;
   emailVerifiedAt: Date | null;
   status: "active" | "inactive";
   password?: string;

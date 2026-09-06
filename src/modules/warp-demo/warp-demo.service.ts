@@ -1,93 +1,86 @@
 import crypto from "node:crypto";
-import { calculateTenureMonths } from "../policy-rule/rule-evaluator.js";
-import type { PolicyResolver } from "../policy/policy-resolver.service.js";
-import type { PolicyStatus } from "../policy/policy.model.js";
 import type { HttpError } from "../../utils/api-error.js";
 import type { PolicyReconciliationJob } from "../../queues/policy-reconciliation.types.js";
+import type { PolicyResolver } from "../policy/policy-resolver.service.js";
 import type { WarpDemoRepository } from "./warp-demo.repository.js";
 import type { WarpDemoProgressService } from "./warp-demo-progress.service.js";
 import type { WarpDemoSandboxEngine } from "./warp-demo-sandbox.engine.js";
-import { WarpDemoBusyError, WarpDemoMutationLimitError, WarpDemoRunConflictError, WarpDemoSessionExpiredError, WarpDemoStaleRunError, type SandboxEmployee, type WarpDemoSeed, type WarpDemoSessionStore } from "./warp-demo-session.store.js";
 import type { WarpDemoMutation } from "./warp-demo.validators.js";
+import { WarpDemoBusyError, WarpDemoMutationLimitError, WarpDemoRunConflictError, WarpDemoSessionExpiredError, WarpDemoStaleRunError, type SandboxEmployee, type WarpDemoSandbox, type WarpDemoSessionStore } from "./warp-demo-session.store.js";
+import { createWarpDemoSeedService } from "./warp-demo.seed.service.js";
+import { createWarpDemoReadService } from "./warp-demo.read.service.js";
+import { explanation, mapPolicies, sandboxEmployeeDto } from "./warp-demo.dto.js";
 
-type Doc = Record<string, any>;
-const id = (value: unknown) => String(value);
-const iso = (value: unknown) => value instanceof Date ? value.toISOString() : value ? new Date(String(value)).toISOString() : null;
+type Dependencies = {
+  repository: WarpDemoRepository;
+  resolver: PolicyResolver;
+  businessId?: string;
+  createHttpError: (message: string, statusCode: number) => HttpError;
+  sessionStore: WarpDemoSessionStore;
+  sandboxEngine: WarpDemoSandboxEngine;
+  progressService: WarpDemoProgressService;
+  enqueueReconciliation: (job: PolicyReconciliationJob) => Promise<unknown>;
+};
 
-type Dependencies = { repository: WarpDemoRepository; resolver: PolicyResolver; businessId?: string; createHttpError: (message: string, statusCode: number) => HttpError; sessionStore: WarpDemoSessionStore; sandboxEngine: WarpDemoSandboxEngine; progressService: WarpDemoProgressService; enqueueReconciliation: (job: PolicyReconciliationJob) => Promise<unknown> };
-
-export const createWarpDemoService = ({ repository, resolver, businessId, createHttpError, sessionStore, sandboxEngine, progressService, enqueueReconciliation }: Dependencies) => {
-  const configuredBusiness = async () => {
-    if (!businessId) throw createHttpError("Warp demo is not configured", 503);
-    const business = await repository.findBusiness(businessId);
-    if (!business || business.name !== "Northstar Labs" || business.email !== "warp-demo@northstar.invalid") throw createHttpError("Warp demo is temporarily unavailable", 503);
-    return business as Doc;
+export const createWarpDemoService = (dependencies: Dependencies) => {
+  const { repository, resolver, businessId, createHttpError, sessionStore, sandboxEngine, progressService, enqueueReconciliation } = dependencies;
+  const seedService = createWarpDemoSeedService({ repository, businessId, createHttpError });
+  const readService = createWarpDemoReadService({ repository, resolver, seedService, businessId, createHttpError });
+  const publicSessionError = (error: unknown): never => {
+    if (error instanceof WarpDemoSessionExpiredError) throw createHttpError(error.message, 410);
+    if (error instanceof WarpDemoRunConflictError || error instanceof WarpDemoStaleRunError) throw createHttpError(error.message, 409);
+    if (error instanceof WarpDemoMutationLimitError) throw createHttpError(error.message, 429);
+    if (error instanceof WarpDemoBusyError) throw createHttpError(error.message, 423);
+    throw error;
   };
-  const dimensions = async () => {
-    await configuredBusiness();
-    const [lists, types, groups] = await Promise.all([repository.listEmployeeLists(businessId!), repository.listEmployeeTypes(businessId!), repository.listEmployeeGroups(businessId!)]);
-    return { departments: new Map((lists as Doc[]).map((item) => [id(item._id), item.name])), employeeTypes: new Map((types as Doc[]).map((item) => [id(item._id), item.name])), groups: new Map((groups as Doc[]).map((item) => [id(item._id), item.name])) };
-  };
-  const employeeDto = (employee: Doc, lookup: Awaited<ReturnType<typeof dimensions>>, now = new Date()) => ({ id: id(employee._id ?? employee.id), name: employee.fullName, jobTitle: employee.jobTitle ?? null, department: lookup.departments.get(id(employee.employeeListId)) ?? "Unknown", employeeType: employee.employeeTypeId ? lookup.employeeTypes.get(id(employee.employeeTypeId)) ?? "Unknown" : null, state: employee.state ?? null, employmentStartDate: iso(employee.employmentStartDate), tenureMonths: calculateTenureMonths(employee.employmentStartDate ? new Date(employee.employmentStartDate) : null, now), groups: (employee.groupIds ?? []).map((groupId: unknown) => lookup.groups.get(id(groupId))).filter(Boolean) });
-  const publicEmployee = (value: ReturnType<typeof employeeDto>) => { const { id: _internalId, ...safe } = value; return { alias: "maya" as const, ...safe }; };
-  const getEmployee = async (employeeId: string) => { const [lookup, employee] = await Promise.all([dimensions(), repository.findEmployee(businessId!, employeeId)]); if (!employee) throw createHttpError("Demo employee not found", 404); return { employee: employee as Doc, lookup, dto: employeeDto(employee as Doc, lookup) }; };
-
-  const overview = async () => { const business = await configuredBusiness(); const [employees, categories, policies, activeRules, activeAssignments] = await Promise.all([repository.listEmployees(businessId!), repository.listCategories(businessId!), repository.listPolicies(businessId!), repository.countActiveRules(businessId!), repository.countActiveAssignments(businessId!)]); return { business: { name: business.name, description: "A fictional technology company used to demonstrate Aurex policy assignment." }, stats: { employees: employees.length, policyCategories: categories.length, policies: policies.length, activeRules, activeAssignments }, concepts: { employeeDimensions: ["department", "employeeType", "group", "state", "tenure"] }, cardinalityModel: "ONE_OR_MANY" }; };
-  const employees = async () => { const lookup = await dimensions(); const [items, assignments] = await Promise.all([repository.listEmployees(businessId!), repository.listActiveAssignments(businessId!)]); const counts = new Map<string, number>(); for (const assignment of assignments as Doc[]) counts.set(id(assignment.employeeId), (counts.get(id(assignment.employeeId)) ?? 0) + 1); return { employees: (items as Doc[]).map((item) => ({ ...employeeDto(item, lookup), resolvedPolicyCount: counts.get(id(item._id)) ?? 0 })) }; };
-  const employee = async (employeeId: string) => (await getEmployee(employeeId)).dto;
-  const categories = async () => { await configuredBusiness(); const [items, policyItems] = await Promise.all([repository.listCategories(businessId!), repository.listPolicies(businessId!)]); return { categories: (items as Doc[]).map((item) => ({ id: id(item._id), name: item.name, description: item.description ?? null, cardinality: item.cardinality, maxAssignments: item.cardinality === "ONE" ? 1 : null, policyCount: (policyItems as Doc[]).filter((policy) => id(policy.categoryId) === id(item._id)).length })) }; };
-  const policies = async (filters: { categoryId?: string; status?: PolicyStatus }) => { await configuredBusiness(); const [items, categoryItems] = await Promise.all([repository.listPolicies(businessId!, filters), repository.listCategories(businessId!)]); const byId = new Map((categoryItems as Doc[]).map((item) => [id(item._id), item])); return { policies: (items as Doc[]).map((item) => { const category = byId.get(id(item.categoryId)); return { id: id(item._id), name: item.name, description: item.description ?? null, category: category ? { id: id(category._id), name: category.name, cardinality: category.cardinality, maxAssignments: category.cardinality === "ONE" ? 1 : null } : null, status: item.status, version: item.version, effectiveFrom: iso(item.effectiveFrom), effectiveTo: iso(item.effectiveTo) }; }) }; };
-  const policy = async (policyId: string) => { const item = await repository.findPolicy(businessId!, policyId); if (!item) throw createHttpError("Demo policy not found", 404); const [categoryItems, rules] = await Promise.all([repository.listCategories(businessId!), repository.listRules(businessId!, [policyId])]); const value = item as Doc; const category = (categoryItems as Doc[]).find((candidate) => id(candidate._id) === id(value.categoryId)); return { id: id(value._id), name: value.name, description: value.description ?? null, category: category ? { id: id(category._id), name: category.name, cardinality: category.cardinality, maxAssignments: category.cardinality === "ONE" ? 1 : null } : null, status: value.status, version: value.version, effectiveFrom: iso(value.effectiveFrom), effectiveTo: iso(value.effectiveTo), rules: (rules as Doc[]).map((rule) => ({ id: id(rule._id), name: rule.name ?? null, priority: rule.priority, status: rule.status, conditions: rule.conditions })) }; };
-  const employeePolicies = async (employeeId: string) => { const { dto } = await getEmployee(employeeId); const [assignments, policyItems, categoryItems, rules] = await Promise.all([repository.listActiveAssignments(businessId!, employeeId), repository.listPolicies(businessId!), repository.listCategories(businessId!), repository.listRules(businessId!)]); return mapPolicies(dto, assignments as Doc[], policyItems as Doc[], categoryItems as Doc[], rules as Doc[]); };
-  const explain = async (employeeId: string) => { const { dto } = await getEmployee(employeeId); const resolution = await resolver.resolvePoliciesForEmployee({ businessId: businessId!, employeeId, asOfDate: new Date() }); const [policyItems, categoryItems] = await Promise.all([repository.listPolicies(businessId!), repository.listCategories(businessId!)]); return explanation(dto, resolution, (policyItems as Doc[]).map(normalizePolicy), (categoryItems as Doc[]).map(normalizeCategory)); };
-  const audit = async (filters: { limit: number; employeeId?: string; policyId?: string; action?: string }) => { await configuredBusiness(); const [events, employeeItems, policyItems] = await Promise.all([repository.listAudit(businessId!, filters), repository.listEmployees(businessId!), repository.listPolicies(businessId!)]); const employeeNames = new Map((employeeItems as Doc[]).map((item) => [id(item._id), item.fullName])); const policyNames = new Map((policyItems as Doc[]).map((item) => [id(item._id), item.name])); return { events: (events as Doc[]).map((event) => auditDto(event, employeeNames.get(id(event.employeeId)), policyNames.get(id(event.policyId)))) }; };
-
-  const loadSeed = async (): Promise<WarpDemoSeed> => {
-    await configuredBusiness();
-    const [employee, lists, types, groups, categoryItems, policyItems, ruleItems] = await Promise.all([repository.findEmployeeByName(businessId!, "Maya Patel"), repository.listEmployeeLists(businessId!), repository.listEmployeeTypes(businessId!), repository.listEmployeeGroups(businessId!), repository.listCategories(businessId!), repository.listPolicies(businessId!), repository.listRules(businessId!)]);
-    if (!employee) throw createHttpError("The live demo is temporarily unavailable.", 503);
-    const dimension = (item: Doc) => ({ id: id(item._id), name: item.name, status: item.status ?? "active" }); const value = employee as Doc;
-    const seed: WarpDemoSeed = { businessId: businessId!, employee: { id: id(value._id), fullName: value.fullName, jobTitle: value.jobTitle ?? null, employeeListId: id(value.employeeListId), employeeTypeId: value.employeeTypeId ? id(value.employeeTypeId) : null, groupIds: (value.groupIds ?? []).map(id), state: value.state ?? null, status: value.status, employmentStartDate: iso(value.employmentStartDate) }, departments: (lists as Doc[]).map(dimension), employeeTypes: (types as Doc[]).map(dimension), groups: (groups as Doc[]).map(dimension), categories: (categoryItems as Doc[]).map(normalizeCategory), policies: (policyItems as Doc[]).map(normalizePolicy), rules: (ruleItems as Doc[]).map(normalizeRule) };
-    for (const required of [[seed.departments, "Engineering"], [seed.departments, "Finance"], [seed.employeeTypes, "Full Time"], [seed.employeeTypes, "Contractor"], [seed.groups, "Remote"]] as const) if (!required[0].some((item) => item.name === required[1])) throw createHttpError("The live demo is temporarily unavailable.", 503);
-    return seed;
-  };
-  const publicSessionError = (error: unknown): never => { if (error instanceof WarpDemoSessionExpiredError) throw createHttpError(error.message, 410); if (error instanceof WarpDemoRunConflictError || error instanceof WarpDemoStaleRunError) throw createHttpError(error.message, 409); if (error instanceof WarpDemoMutationLimitError) throw createHttpError(error.message, 429); if (error instanceof WarpDemoBusyError) throw createHttpError(error.message, 423); throw error; };
-  const sandboxLookup = (seed: WarpDemoSeed) => ({ departments: new Map(seed.departments.map((item) => [item.id, item.name])), employeeTypes: new Map(seed.employeeTypes.map((item) => [item.id, item.name])), groups: new Map(seed.groups.map((item) => [item.id, item.name])) });
-  const sandboxEmployeeDto = (employee: SandboxEmployee, seed: WarpDemoSeed) => publicEmployee(employeeDto({ ...employee, _id: employee.id }, sandboxLookup(seed)));
-  const queueChange = async ({ sandbox, employee, description, reason, countMutation, supersede = false }: { sandbox: Awaited<ReturnType<WarpDemoSessionStore["getSession"]>>; employee: SandboxEmployee; description: string; reason: string; countMutation: boolean; supersede?: boolean }) => {
-    const runId = crypto.randomUUID(); const employeeChanged = JSON.stringify(sandbox.employee) !== JSON.stringify(employee); let revision: number;
+  const queueChange = async ({ sandbox, employee, description, reason, countMutation, supersede = false }: { sandbox: WarpDemoSandbox; employee: SandboxEmployee; description: string; reason: string; countMutation: boolean; supersede?: boolean }) => {
+    const runId = crypto.randomUUID();
+    const employeeChanged = JSON.stringify(sandbox.employee) !== JSON.stringify(employee);
+    let revision: number;
     try { revision = await sessionStore.beginRun({ sessionId: sandbox.id, runId, expectedRevision: sandbox.revision, employee, countMutation, supersede }); } catch (error) { return publicSessionError(error); }
-    try { await progressService.createRun({ runId, sessionId: sandbox.id }); await progressService.appendEvent(runId, { stage: "employee_update", status: "success", title: employeeChanged ? "Employee updated" : "Employee already at requested state", description: employeeChanged ? description : "The employee facts already matched the requested demo state." }, "employee-updated"); await progressService.appendEvent(runId, { stage: "queued", status: "pending", title: "Reconciliation queued", description: "The real Aurex policy engine will reconcile this session sandbox." }, "queued"); const queued = await enqueueReconciliation({ type: "RECONCILE_WARP_DEMO", sessionId: sandbox.id, runId, revision, employeeChanged, reason: `warp_demo.${reason}`, requestedAt: new Date().toISOString(), correlationId: runId }); if (!queued) throw new Error("Demo reconciliation queue is unavailable"); return { runId, status: "queued" as const }; } catch (error) { await progressService.markFailed(runId).catch(() => undefined); await sessionStore.finishRun(sandbox.id, runId).catch(() => undefined); throw createHttpError("Reconciliation could not be started. Reset the scenario and try again.", 503); }
+    try {
+      await progressService.createRun({ runId, sessionId: sandbox.id });
+      await progressService.appendEvent(runId, { stage: "employee_update", status: "success", title: employeeChanged ? "Employee updated" : "Employee already at requested state", description: employeeChanged ? description : "The employee facts already matched the requested demo state." }, "employee-updated");
+      await progressService.appendEvent(runId, { stage: "queued", status: "pending", title: "Reconciliation queued", description: "The real Aurex policy engine will reconcile this session sandbox." }, "queued");
+      const queued = await enqueueReconciliation({ type: "RECONCILE_WARP_DEMO", sessionId: sandbox.id, runId, revision, employeeChanged, reason: `warp_demo.${reason}`, requestedAt: new Date().toISOString(), correlationId: runId });
+      if (!queued) throw new Error("Demo reconciliation queue is unavailable");
+      return { runId, status: "queued" as const };
+    } catch {
+      await progressService.markFailed(runId).catch(() => undefined);
+      await sessionStore.finishRun(sandbox.id, runId).catch(() => undefined);
+      throw createHttpError("Reconciliation could not be started. Reset the scenario and try again.", 503);
+    }
   };
-  const createSession = async () => { let sandbox; try { sandbox = await sessionStore.createSession(await loadSeed()); } catch (error) { return publicSessionError(error); } const initialization = await queueChange({ sandbox, employee: sandbox.baselineEmployee, description: "Maya Patel was initialized from the canonical demo seed.", reason: "session_initialized", countMutation: false }); return { sessionId: sandbox.id, expiresAt: sandbox.expiresAt, employee: sandboxEmployeeDto(sandbox.employee, sandbox.seed), initialization, controls: { department: ["engineering", "finance"], employeeType: ["full_time", "contractor"], state: ["california", "new_york"], remoteGroup: ["member", "not_member"] } }; };
-  const mutate = async (sessionId: string, mutation: WarpDemoMutation) => { let sandbox; try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } const employee = { ...sandbox.employee, groupIds: [...sandbox.employee.groupIds] }; const before = sandboxEmployeeDto(employee, sandbox.seed); let description: string; if (mutation.field === "department") { const name = mutation.value === "engineering" ? "Engineering" : "Finance"; employee.employeeListId = sandbox.seed.departments.find((item) => item.name === name)!.id; description = `Department changed from ${before.department} to ${name}.`; } else if (mutation.field === "employeeType") { const name = mutation.value === "full_time" ? "Full Time" : "Contractor"; employee.employeeTypeId = sandbox.seed.employeeTypes.find((item) => item.name === name)!.id; description = `Employee type changed from ${before.employeeType} to ${name}.`; } else if (mutation.field === "state") { const name = mutation.value === "california" ? "California" : "New York"; employee.state = name; description = `State changed from ${before.state} to ${name}.`; } else { const remote = sandbox.seed.groups.find((item) => item.name === "Remote")!.id; employee.groupIds = employee.groupIds.filter((item) => item !== remote); if (mutation.value === "member") employee.groupIds.push(remote); description = mutation.value === "member" ? "Maya Patel joined the Remote group." : "Maya Patel left the Remote group."; } return queueChange({ sandbox, employee, description, reason: `${mutation.field}_changed`, countMutation: true }); };
-  const reset = async (sessionId: string) => { let sandbox; try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } const run = await queueChange({ sandbox, employee: sandbox.baselineEmployee, description: "Maya Patel was reset to the canonical demo baseline.", reason: "reset", countMutation: true, supersede: true }); return { ...run, employee: sandboxEmployeeDto(sandbox.baselineEmployee, sandbox.seed) }; };
+  const createSession = async () => {
+    let sandbox: WarpDemoSandbox;
+    try { sandbox = await sessionStore.createSession(await seedService.loadSeed()); } catch (error) { return publicSessionError(error); }
+    const initialization = await queueChange({ sandbox, employee: sandbox.baselineEmployee, description: "Maya Patel was initialized from the canonical demo seed.", reason: "session_initialized", countMutation: false });
+    return { sessionId: sandbox.id, expiresAt: sandbox.expiresAt, employee: sandboxEmployeeDto(sandbox.employee, sandbox.seed), initialization, controls: { department: ["engineering", "finance"], employeeType: ["full_time", "contractor"], state: ["california", "new_york"], remoteGroup: ["member", "not_member"] } };
+  };
+  const mutate = async (sessionId: string, mutation: WarpDemoMutation) => {
+    let sandbox: WarpDemoSandbox;
+    try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); }
+    const employee = { ...sandbox.employee, groupIds: [...sandbox.employee.groupIds] };
+    const before = sandboxEmployeeDto(employee, sandbox.seed);
+    let description: string;
+    if (mutation.field === "department") { const name = mutation.value === "engineering" ? "Engineering" : "Finance"; employee.employeeListId = sandbox.seed.departments.find((item) => item.name === name)!.id; description = `Department changed from ${before.department} to ${name}.`; }
+    else if (mutation.field === "employeeType") { const name = mutation.value === "full_time" ? "Full Time" : "Contractor"; employee.employeeTypeId = sandbox.seed.employeeTypes.find((item) => item.name === name)!.id; description = `Employee type changed from ${before.employeeType} to ${name}.`; }
+    else if (mutation.field === "state") { const name = mutation.value === "california" ? "California" : "New York"; employee.state = name; description = `State changed from ${before.state} to ${name}.`; }
+    else { const remote = sandbox.seed.groups.find((item) => item.name === "Remote")!.id; employee.groupIds = employee.groupIds.filter((item) => item !== remote); if (mutation.value === "member") employee.groupIds.push(remote); description = mutation.value === "member" ? "Maya Patel joined the Remote group." : "Maya Patel left the Remote group."; }
+    return queueChange({ sandbox, employee, description, reason: `${mutation.field}_changed`, countMutation: true });
+  };
+  const reset = async (sessionId: string) => {
+    let sandbox: WarpDemoSandbox;
+    try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); }
+    const run = await queueChange({ sandbox, employee: sandbox.baselineEmployee, description: "Maya Patel was reset to the canonical demo baseline.", reason: "reset", countMutation: true, supersede: true });
+    return { ...run, employee: sandboxEmployeeDto(sandbox.baselineEmployee, sandbox.seed) };
+  };
   const sessionEmployee = async (sessionId: string) => { try { const sandbox = await sessionStore.getSession(sessionId); return sandboxEmployeeDto(sandbox.employee, sandbox.seed); } catch (error) { return publicSessionError(error); } };
-  const sessionEmployeePolicies = async (sessionId: string) => { let sandbox; try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } return mapPolicies(sandboxEmployeeDto(sandbox.employee, sandbox.seed), sandbox.assignments.filter((item) => item.status === "active"), sandbox.seed.policies, sandbox.seed.categories, sandbox.seed.rules); };
-  const sessionExplain = async (sessionId: string) => { let sandbox; try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } return explanation(sandboxEmployeeDto(sandbox.employee, sandbox.seed), await sandboxEngine.resolve(sandbox), sandbox.seed.policies, sandbox.seed.categories); };
-  const sessionAudit = async (sessionId: string) => { let sandbox; try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } const names = new Map(sandbox.seed.policies.map((item) => [item.id, item.name])); return { events: [...sandbox.audit].reverse().map((event) => auditDto(event, sandbox.employee.fullName, event.policyId ? names.get(event.policyId) : undefined)) }; };
+  const sessionEmployeePolicies = async (sessionId: string) => { let sandbox: WarpDemoSandbox; try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } return mapPolicies(sandboxEmployeeDto(sandbox.employee, sandbox.seed), sandbox.assignments.filter((item) => item.status === "active"), sandbox.seed.policies, sandbox.seed.categories, sandbox.seed.rules); };
+  const sessionExplain = async (sessionId: string) => { let sandbox: WarpDemoSandbox; try { sandbox = await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } return explanation(sandboxEmployeeDto(sandbox.employee, sandbox.seed), await sandboxEngine.resolve(sandbox), sandbox.seed.policies, sandbox.seed.categories); };
+  const sessionAudit = async (sessionId: string) => { try { const sandbox = await sessionStore.getSession(sessionId); const names = new Map(sandbox.seed.policies.map((item) => [item.id, item.name])); return { events: [...sandbox.audit].reverse().map((event) => ({ id: event.id, timestamp: event.occurredAt, entityType: event.entityType, action: event.action, actor: { type: event.actorType, displayName: event.actorType === "demo" ? "Demo reviewer" : "Aurex policy engine" }, policyName: event.policyId ? names.get(event.policyId) : undefined, summary: [event.action.replaceAll("_", " ").toLowerCase(), event.policyId ? names.get(event.policyId) : null, `for ${sandbox.employee.fullName}`].filter(Boolean).join(" "), ...(event.reason ? { reason: event.reason } : {}) })) }; } catch (error) { return publicSessionError(error); } };
   const reconciliationRun = async (sessionId: string, runId: string) => { try { await sessionStore.getSession(sessionId); } catch (error) { return publicSessionError(error); } const run = await progressService.getRun(sessionId, runId); if (!run) throw createHttpError("Reconciliation run not found.", 404); return run; };
-  return { overview, employees, employee, employeePolicies, explain, categories, policies, policy, audit, createSession, mutate, reset, sessionEmployee, sessionEmployeePolicies, sessionExplain, sessionAudit, reconciliationRun };
+  return { ...readService, createSession, mutate, reset, sessionEmployee, sessionEmployeePolicies, sessionExplain, sessionAudit, reconciliationRun };
 };
-
-const normalizeCategory = (item: Doc) => ({ id: id(item._id ?? item.id), name: item.name, description: item.description ?? null, cardinality: item.cardinality as "ONE" | "MANY", status: item.status });
-const normalizePolicy = (item: Doc) => ({ id: id(item._id ?? item.id), categoryId: id(item.categoryId), name: item.name, description: item.description ?? null, version: item.version, status: item.status, effectiveFrom: iso(item.effectiveFrom), effectiveTo: iso(item.effectiveTo), ...(item.configuration ? { configuration: item.configuration } : {}) });
-const normalizeRule = (item: Doc) => ({ id: id(item._id ?? item.id), policyId: id(item.policyId), name: item.name ?? null, conditions: item.conditions.map((condition: Doc) => ({ field: condition.field, operator: condition.operator, value: Array.isArray(condition.value) ? condition.value.map(id) : condition.value && typeof condition.value === "object" ? id(condition.value) : condition.value })), priority: item.priority, version: item.version, status: item.status, effectiveFrom: iso(item.effectiveFrom), effectiveTo: iso(item.effectiveTo) });
-const mapPolicies = (employee: unknown, assignments: Doc[], policies: Doc[], categories: Doc[], rules: Doc[]) => { const policyById = new Map(policies.map((item) => [id(item._id ?? item.id), item])); const categoryById = new Map(categories.map((item) => [id(item._id ?? item.id), item])); const ruleById = new Map(rules.map((item) => [id(item._id ?? item.id), item])); return { employee, policies: assignments.flatMap((assignment) => { const policy = policyById.get(id(assignment.policyId)); const category = categoryById.get(id(assignment.categoryId)); if (!policy || !category) return []; const rule = assignment.winningRuleId ? ruleById.get(id(assignment.winningRuleId)) : null; return [{ id: id(policy._id ?? policy.id), name: policy.name, category: { id: id(category._id ?? category.id), name: category.name, cardinality: category.cardinality, maxAssignments: category.cardinality === "ONE" ? 1 : null }, source: assignment.source, priority: rule?.priority ?? null, effectiveFrom: iso(assignment.effectiveFrom), effectiveTo: iso(assignment.effectiveTo), winningRuleName: rule?.name ?? null }]; }) }; };
-const explanation = (employee: unknown, resolution: any, policies: Doc[], categories: Doc[]) => {
-  const policyById = new Map(policies.map((item) => [id(item.id ?? item._id), item]));
-  const selected = new Set(resolution.desiredPolicies.map((item: Doc) => item.policyId));
-  return { employee, evaluationDate: resolution.evaluationDate.toISOString(), evaluatedRules: resolution.evaluatedRules, categories: categories.map((category) => {
-    const policyIds = policies.filter((item) => id(item.categoryId) === id(category.id ?? category._id)).map((item) => id(item.id ?? item._id));
-    const candidates = policyIds.flatMap((policyId) => {
-      const evaluations = resolution.evaluatedRules.filter((item: Doc) => item.policyId === policyId);
-      if (!evaluations.length) return [];
-      const matched = evaluations.filter((item: Doc) => item.matched);
-      return [{ policyId, policyName: policyById.get(policyId)?.name ?? "Unknown policy", matched: matched.length > 0, priority: Math.max(...evaluations.map((item: Doc) => item.priority)), selected: selected.has(policyId), source: "rule", matchedRules: matched.map((item: Doc) => ({ ruleId: item.ruleId, ruleName: item.ruleName ?? null, priority: item.priority, conditions: item.conditions.map((entry: Doc) => ({ field: entry.condition.field, operator: entry.condition.operator, expectedValue: entry.expectedDisplayValue ?? entry.condition.value, actualValue: entry.actualDisplayValue ?? entry.actualValue, matched: entry.matched })) })), suppressedReason: resolution.suppressedCandidates.some((candidate: Doc) => candidate.policyId === policyId) ? "cardinality_limit" : null }];
-    });
-    return { category: { id: id(category.id ?? category._id), name: category.name, cardinality: category.cardinality, maxAssignments: category.cardinality === "ONE" ? 1 : null }, candidates, selectedPolicies: candidates.filter((item: Doc) => item.selected).map((item: Doc) => ({ id: item.policyId, name: item.policyName })) };
-  }) };
-};
-const auditDto = (event: Doc, employeeName?: string, policyName?: string) => ({ id: id(event._id ?? event.id), timestamp: iso(event.occurredAt), entityType: event.entityType, action: event.action, ...(employeeName ? { employeeName } : {}), ...(policyName ? { policyName } : {}), actor: { type: event.actorType, displayName: event.actorType === "demo" ? "Demo reviewer" : "Aurex policy engine" }, summary: [String(event.action).replaceAll("_", " ").toLowerCase(), policyName, employeeName ? `for ${employeeName}` : null].filter(Boolean).join(" "), ...(event.reason ? { reason: event.reason } : {}) });
 
 export type WarpDemoService = ReturnType<typeof createWarpDemoService>;

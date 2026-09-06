@@ -15,6 +15,11 @@ import { userRepository } from "../users/user.repository.js";
 import { verificationService } from "../verification/verification.module.js";
 import { createAuthController } from "./auth.controller.js";
 import { createAuthService } from "./auth.service.js";
+import { createGoogleOAuthService } from "./google-oauth.service.js";
+
+const googleOAuthService = createGoogleOAuthService({
+  createHttpError,
+});
 
 export const authService = createAuthService({
   userRepository,
@@ -24,6 +29,7 @@ export const authService = createAuthService({
   auditEventService,
   withTransaction,
   createHttpError,
+  googleOAuthService,
 });
 
 export const authController = createAuthController({
@@ -36,4 +42,5 @@ export const authController = createAuthController({
   createApiError: (statusCode, message) => new ApiError(statusCode, message),
   getErrorStatusCode,
   getErrorMessage,
+  googleOAuthService,
 });
