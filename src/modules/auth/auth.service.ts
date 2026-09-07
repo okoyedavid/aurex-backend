@@ -2,6 +2,7 @@ import { RequestMetadata } from "../../types/repository-types.js";
 import { jsonWebService } from "../../utils/jwt.js";
 import {
   LoginInput,
+  GoogleLoginInput,
   RegisterInput,
   AuthServiceDependencies,
   ForgotPasswordInput,
@@ -18,9 +19,13 @@ const createAuthService = ({
   auditEventService,
   withTransaction,
   createHttpError,
-  // authProviderRepository,
-  // tokenService,
+  googleOAuthService,
 }: AuthServiceDependencies) => {
+  const safeUser = (user: any) => {
+    const { password: _password, googleId: _googleId, ...safeUserObject } = user.toObject();
+    return { ...safeUserObject, id: user.id };
+  };
+
   const loginUser = async ({
     email,
     password,
@@ -39,11 +44,7 @@ const createAuthService = ({
       throw createHttpError("Invalid credentials", 401);
     }
 
-    const { password: _password, ...safeUserObject } = user.toObject();
-    const safeUser = {
-      ...safeUserObject,
-      id: user.id,
-    };
+    const publicUser = safeUser(user);
 
     const { accessToken, refreshToken, userSession } =
       await sessionService.createLoginSession({
@@ -52,7 +53,59 @@ const createAuthService = ({
         location,
       });
 
-    return { accessToken, refreshToken, user: safeUser, userSession };
+    return { accessToken, refreshToken, user: publicUser, userSession };
+  };
+
+  const loginWithGoogle = async ({
+    code,
+    nonce,
+    requestMetadata,
+    location,
+  }: GoogleLoginInput) => {
+    const profile = await googleOAuthService.authenticateCode(code, nonce);
+    let user = await userRepository.findUserByGoogleId(profile.subject);
+
+    if (!user) {
+      user = await userRepository.findUserByEmail(profile.email);
+      if (user?.googleId && user.googleId !== profile.subject) {
+        throw createHttpError("This email is already linked to another Google account", 409);
+      }
+    }
+
+    if (user?.status === "inactive") {
+      throw createHttpError("This account is inactive", 403);
+    }
+
+    if (!user) {
+      const fallbackName = profile.email.split("@")[0] || "Google User";
+      const profileName = profile.name?.slice(0, 50) || fallbackName.slice(0, 50);
+      user = await userRepository.createUser({
+        email: profile.email,
+        name: profileName.length >= 2 ? profileName : "Google User",
+        googleId: profile.subject,
+        avatar: profile.picture,
+        emailVerifiedAt: new Date(),
+      });
+    } else {
+      const isFirstGoogleLink = !user.googleId;
+      const updatedUser = await userRepository.updateUserById(user.id, {
+        googleId: profile.subject,
+        emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+        ...(isFirstGoogleLink && profile.picture ? { avatar: profile.picture } : {}),
+      });
+      if (updatedUser) user = updatedUser;
+    }
+
+    const { accessToken, refreshToken, userSession } =
+      await sessionService.createLoginSession({ user, requestMetadata, location });
+
+    return {
+      accessToken,
+      refreshToken,
+      user: safeUser(user),
+      userSession,
+      email: user.email,
+    };
   };
 
   const registerUser = async ({ name, email, password }: RegisterInput) => {
@@ -357,6 +410,7 @@ const createAuthService = ({
 
   return {
     loginUser,
+    loginWithGoogle,
     registerUser,
     logoutUser,
     forgotPassword,
