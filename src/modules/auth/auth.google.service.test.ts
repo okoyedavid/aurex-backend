@@ -51,7 +51,6 @@ describe("Google authentication", () => {
     await fixture.service.loginWithGoogle({ code: "code", nonce: "state", requestMetadata, location });
     expect(fixture.repository.updateUserById).toHaveBeenCalledWith("user-existing", expect.objectContaining({ googleId: "google-1", avatar: "https://avatar", emailVerifiedAt: expect.any(Date) }));
   });
-
   it("preserves a custom avatar on subsequent Google logins", async () => {
     const existing = { id: "user-existing", email: "new@example.com", name: "Existing", password: "hash", googleId: "google-1", avatar: "https://custom-avatar", emailVerifiedAt: new Date() };
     const fixture = setup(existing);

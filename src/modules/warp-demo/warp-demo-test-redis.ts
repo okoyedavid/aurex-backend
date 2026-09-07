@@ -16,5 +16,29 @@ export class MemoryWarpDemoRedis implements WarpDemoRedisClient {
   async expire(key: string, seconds: number) { this.purge(key); if (!this.strings.has(key) && !this.hashes.has(key) && !this.lists.has(key)) return 0; this.expirations.set(key, Date.now() + seconds * 1000); return 1; }
   async ttl(key: string) { this.purge(key); if (!this.strings.has(key) && !this.hashes.has(key) && !this.lists.has(key)) return -2; const expiry = this.expirations.get(key); return expiry === undefined ? -1 : Math.max(0, Math.ceil((expiry - Date.now()) / 1000)); }
   async del(...keys: string[]) { let count = 0; for (const key of keys) { count += Number(this.strings.delete(key) || this.hashes.delete(key) || this.lists.delete(key)); this.expirations.delete(key); } return count; }
-  async eval(_script: string, _numberOfKeys: number, key: string, expected: string) { if (await this.get(key) !== expected) return 0; return this.del(key); }
+  async eval(script: string, _numberOfKeys: number, key: string, ...args: Array<string | number>) {
+    const stored = await this.hgetall(key);
+    if (script.includes('"mutationCount"')) {
+      if (!stored.id) return [-1, "expired"];
+      if (Number(stored.revision) !== Number(args[0])) return [-2, "stale"];
+      if (stored.activeRunId && String(args[4]) !== "1") return [-3, "active"];
+      const count = Number(stored.mutationCount) + (String(args[3]) === "1" ? 1 : 0);
+      if (count > Number(args[5])) return [-4, "limit"];
+      const revision = Number(stored.revision) + 1;
+      await this.hset(key, { revision: String(revision), activeRunId: String(args[1]), employee: String(args[2]), mutationCount: String(count) });
+      return [revision, "ok"];
+    }
+    if (script.includes('"assignments"')) {
+      if (!stored.id) return 0;
+      if (Number(stored.revision) !== Number(args[0]) || stored.activeRunId !== String(args[1])) return -1;
+      await this.hset(key, { assignments: String(args[2]), audit: String(args[3]), activeRunId: "" });
+      return 1;
+    }
+    if (script.includes('"activeRunId"')) {
+      if (stored.activeRunId !== String(args[0])) return 0;
+      await this.hset(key, { activeRunId: "" });
+      return 1;
+    }
+    return 0;
+  }
 }

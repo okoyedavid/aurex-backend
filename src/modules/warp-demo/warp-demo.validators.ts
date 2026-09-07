@@ -56,3 +56,4 @@ export const createSessionRequest = z.object({ body: empty.optional(), params: e
 export const mutationRequest = z.object({ body: mutation, params: z.object({ sessionId }).strict(), query: empty });
 export const resetRequest = z.object({ body: empty.optional(), params: z.object({ sessionId }).strict(), query: empty });
 export const reconciliationRunRequest = z.object({ body: empty.optional(), params: z.object({ sessionId, runId }).strict(), query: empty });
+export const sessionRequest = z.object({ body: empty.optional(), params: z.object({ sessionId }).strict(), query: empty });

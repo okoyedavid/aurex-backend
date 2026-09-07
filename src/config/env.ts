@@ -16,6 +16,11 @@ dotenv.config({
   path: nodeEnv === "test" ? ".env.test" : ".env",
 });
 
+const optionalEnvString = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "production", "test"])
@@ -32,6 +37,12 @@ const envSchema = z.object({
   REFRESH_TOKEN_EXPIRES_IN: jwtExpiresInSchema.default("7d" as JwtExpiresIn),
 
   CLIENT_URL: z.string().url("CLIENT_URL must be a valid URL"),
+  GOOGLE_CLIENT_ID: optionalEnvString,
+  GOOGLE_CLIENT_SECRET: optionalEnvString,
+  GOOGLE_REDIRECT_URL: z.preprocess(
+    (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+    z.string().url().optional(),
+  ),
   RELEASE: z.string().min(1, "MONGO_URI is required"),
   MAXMIND_DB_PATH: z.string().min(1, "MAXMIND_DB_PATH is required"),
   RESEND_API_KEY: z.string().min(1).optional(),
@@ -66,6 +77,23 @@ const envSchema = z.object({
   GITHUB_APP_PRIVATE_KEY: z.string().min(1).optional(),
   GITHUB_APP_PRIVATE_KEY_B64: z.string().min(1).optional(),
   GITHUB_API_BASE_URL: z.string().url().default("https://api.github.com"),
+}).superRefine((configuration, context) => {
+  const credentialsConfigured = Boolean(
+    configuration.GOOGLE_CLIENT_ID || configuration.GOOGLE_CLIENT_SECRET,
+  );
+  const configured = [
+    configuration.GOOGLE_CLIENT_ID,
+    configuration.GOOGLE_CLIENT_SECRET,
+    configuration.GOOGLE_REDIRECT_URL,
+  ].filter(Boolean).length;
+
+  if (credentialsConfigured && configured < 3) {
+    context.addIssue({
+      code: "custom",
+      path: ["GOOGLE_CLIENT_ID"],
+      message: "GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URL must be configured together",
+    });
+  }
 });
 
 export const env = envSchema.parse(process.env);

@@ -4,7 +4,10 @@ import type { UserSchemaType } from "./user.models.js";
 export type CreateUserPayload = {
   email: string;
   name: string;
-  password: string;
+  password?: string;
+  googleId?: string;
+  avatar?: string | null;
+  emailVerifiedAt?: Date;
 };
 
 export type UserWithPasswordDocument = HydratedDocument<

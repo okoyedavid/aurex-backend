@@ -1,20 +1,13 @@
 import crypto from "node:crypto";
-import type { WithTransaction } from "../../utils/mongooose-transactions.js";
-import type { HttpError } from "../../utils/api-error.js";
-import type { PolicyAuditActor, PolicyAuditService } from "../policy-audit/policy-audit.service.js";
-import type { EmployeeRepository } from "../employee/employee.repository.js";
-import type { PolicyRepository } from "./policy.repository.js";
 import type { PolicyResolver } from "./policy-resolver.service.js";
 import { isEffectiveAt } from "./policy-effective.js";
-
-type Dependencies = {
-  repository: PolicyRepository;
-  employeeRepository: EmployeeRepository;
-  resolver: PolicyResolver;
-  auditService: PolicyAuditService;
-  withTransaction: WithTransaction;
-  createHttpError: (message: string, statusCode: number) => HttpError;
-};
+import { planAssignmentTransitions, type AssignmentSnapshot } from "./policy-assignment-transition.js";
+import type {
+  CreateManualAssignmentInput,
+  EndManualAssignmentInput,
+  PolicyReconciliationDependencies,
+  ReconcileEmployeePoliciesInput,
+} from "./policy-reconciliation.types.js";
 
 const id = (value: unknown) => String(value);
 
@@ -25,7 +18,7 @@ export const createPolicyReconciliationService = ({
   auditService,
   withTransaction,
   createHttpError,
-}: Dependencies) => {
+}: PolicyReconciliationDependencies) => {
   const reconcileEmployeePolicies = async ({
     businessId,
     employeeId,
@@ -34,87 +27,49 @@ export const createPolicyReconciliationService = ({
     actor,
     correlationId,
     triggeredByUserId,
-  }: {
-    businessId: string;
-    employeeId: string;
-    asOfDate: Date;
-    reason: string;
-    actor: PolicyAuditActor;
-    correlationId?: string;
-    triggeredByUserId?: string;
-  }) => {
+  }: ReconcileEmployeePoliciesInput) => {
     const resolution = await resolver.resolvePoliciesForEmployee({ businessId, employeeId, asOfDate });
     const reconciliationRunId = crypto.randomUUID();
     const result = await withTransaction(async (session) => {
       const current = await repository.findAssignmentsAsOf(businessId, employeeId, asOfDate, { session });
-      const currentByPolicy = new Map(current.map((assignment) => [id(assignment.policyId), assignment]));
-      const desiredIds = new Set(resolution.desiredPolicies.map((candidate) => candidate.policyId));
+      const documentsById = new Map(current.map((assignment) => [assignment.id, assignment]));
+      const snapshots: AssignmentSnapshot[] = current.map((assignment) => ({
+        id: assignment.id,
+        policyId: id(assignment.policyId),
+        categoryId: id(assignment.categoryId),
+        policyVersion: assignment.policyVersion,
+        source: assignment.source,
+        winningRuleId: assignment.winningRuleId ? id(assignment.winningRuleId) : null,
+        matchedRuleIds: (assignment.matchedRuleIds ?? []).map(id),
+        status: assignment.status,
+        effectiveFrom: assignment.effectiveFrom,
+        effectiveTo: assignment.effectiveTo ?? null,
+        resolvedAt: assignment.resolvedAt,
+        createdBy: assignment.createdBy ? id(assignment.createdBy) : null,
+      }));
+      const transitions = planAssignmentTransitions({ current: snapshots, desired: resolution.desiredPolicies, asOfDate });
       const changes: Array<{ operation: "KEEP" | "CREATE" | "END" | "UPDATE_VERSION"; policyId: string; assignmentId: string; previousAssignmentId?: string }> = [];
 
-      for (const desired of resolution.desiredPolicies) {
-        const existing = currentByPolicy.get(desired.policyId);
-        if (existing) {
-          const existingRuleIds = (existing.matchedRuleIds ?? []).map(id).sort();
-          const desiredRuleIds = [...desired.matchedRuleIds].sort();
-          const needsUpdate =
-            existing.policyVersion !== desired.policyVersion ||
-            id(existing.categoryId) !== desired.categoryId ||
-            id(existing.winningRuleId ?? "") !== (desired.winningRuleId ?? "") ||
-            existing.source !== desired.source ||
-            JSON.stringify(existingRuleIds) !== JSON.stringify(desiredRuleIds);
-          if (!needsUpdate) {
-            changes.push({ operation: "KEEP", policyId: desired.policyId, assignmentId: existing.id });
-            continue;
-          }
-          const before = existing.toObject();
-          const ended = await repository.updateAssignment(existing.id, { $set: {
-            status: "ended",
-            effectiveTo: asOfDate,
-            resolvedAt: asOfDate,
-          } }, { session });
-          if (!ended) throw new Error("Assignment disappeared during reconciliation");
-          const replacement = await repository.createAssignment({
-            businessId,
-            employeeId,
-            policyId: desired.policyId,
-            categoryId: desired.categoryId,
-            policyVersion: desired.policyVersion,
-            source: desired.source,
-            winningRuleId: desired.winningRuleId,
-            matchedRuleIds: desired.matchedRuleIds,
-            status: "active",
-            effectiveFrom: asOfDate,
-            resolvedAt: asOfDate,
-            ...(existing.createdBy ? { createdBy: existing.createdBy } : {}),
-          }, { session });
-          await auditService.record({ ...actor, businessId, entityType: desired.source === "manual" ? "manual_assignment" : "employee_policy_assignment", entityId: replacement.id, employeeId, policyId: desired.policyId, policyRuleId: desired.winningRuleId ?? undefined, categoryId: desired.categoryId, action: "ASSIGNMENT_VERSION_UPDATED", before, after: replacement.toObject(), changedFields: ["policyVersion", "categoryId", "source", "winningRuleId", "matchedRuleIds", "status", "effectiveFrom", "effectiveTo", "resolvedAt"], reason, correlationId, reconciliationRunId, metadata: { previousAssignmentId: existing.id, conditionEvaluations: desired.conditionEvaluations, triggeredByUserId } }, session);
-          changes.push({ operation: "UPDATE_VERSION", policyId: desired.policyId, assignmentId: replacement.id, previousAssignmentId: existing.id });
+      for (const transition of transitions) {
+        if (transition.operation === "KEEP") {
+          changes.push({ operation: "KEEP", policyId: transition.policyId, assignmentId: transition.existing.id });
           continue;
         }
-
-        const assignment = await repository.createAssignment({
-          businessId,
-          employeeId,
-          policyId: desired.policyId,
-          categoryId: desired.categoryId,
-          policyVersion: desired.policyVersion,
-          source: desired.source,
-          winningRuleId: desired.winningRuleId,
-          matchedRuleIds: desired.matchedRuleIds,
-          status: "active",
-          effectiveFrom: asOfDate,
-          resolvedAt: asOfDate,
-        }, { session });
-        await auditService.record({ ...actor, businessId, entityType: "employee_policy_assignment", entityId: assignment.id, employeeId, policyId: desired.policyId, policyRuleId: desired.winningRuleId ?? undefined, categoryId: desired.categoryId, action: "ASSIGNMENT_CREATED", after: assignment.toObject(), reason, correlationId, reconciliationRunId, metadata: { conditionEvaluations: desired.conditionEvaluations, triggeredByUserId } }, session);
-        changes.push({ operation: "CREATE", policyId: desired.policyId, assignmentId: assignment.id });
-      }
-
-      for (const assignment of current) {
-        if (desiredIds.has(id(assignment.policyId))) continue;
-        const ended = await repository.updateAssignment(assignment.id, { $set: { status: "ended", effectiveTo: asOfDate, resolvedAt: asOfDate } }, { session });
-        if (!ended) throw new Error("Assignment disappeared during reconciliation");
-        await auditService.record({ ...actor, businessId, entityType: assignment.source === "manual" ? "manual_assignment" : "employee_policy_assignment", entityId: ended.id, employeeId, policyId: id(assignment.policyId), categoryId: id(assignment.categoryId), action: assignment.source === "manual" ? "MANUAL_ASSIGNMENT_ENDED" : "ASSIGNMENT_ENDED", before: assignment.toObject(), after: ended.toObject(), changedFields: ["status", "effectiveTo", "resolvedAt"], reason, correlationId, reconciliationRunId, metadata: { triggeredByUserId } }, session);
-        changes.push({ operation: "END", policyId: id(assignment.policyId), assignmentId: ended.id });
+        if (transition.operation === "END" || transition.operation === "UPDATE_VERSION") {
+          const existing = documentsById.get(transition.before.id)!;
+          const ended = await repository.updateAssignment(existing.id, { $set: { status: "ended", effectiveTo: asOfDate, resolvedAt: asOfDate } }, { session });
+          if (!ended) throw new Error("Assignment disappeared during reconciliation");
+          if (transition.operation === "END") {
+            await auditService.record({ ...actor, businessId, entityType: existing.source === "manual" ? "manual_assignment" : "employee_policy_assignment", entityId: ended.id, employeeId, policyId: transition.policyId, categoryId: id(existing.categoryId), action: existing.source === "manual" ? "MANUAL_ASSIGNMENT_ENDED" : "ASSIGNMENT_ENDED", before: existing.toObject(), after: ended.toObject(), changedFields: ["status", "effectiveTo", "resolvedAt"], reason, correlationId, reconciliationRunId, metadata: { triggeredByUserId } }, session);
+            changes.push({ operation: "END", policyId: transition.policyId, assignmentId: ended.id });
+            continue;
+          }
+        }
+        const desired = transition.desired;
+        const previous = transition.operation === "UPDATE_VERSION" ? documentsById.get(transition.before.id)! : null;
+        const assignment = await repository.createAssignment({ businessId, employeeId, policyId: desired.policyId, categoryId: desired.categoryId, policyVersion: desired.policyVersion, source: desired.source, winningRuleId: desired.winningRuleId, matchedRuleIds: desired.matchedRuleIds, status: "active", effectiveFrom: asOfDate, resolvedAt: asOfDate, ...(previous?.createdBy ? { createdBy: previous.createdBy } : {}) }, { session });
+        await auditService.record({ ...actor, businessId, entityType: desired.source === "manual" ? "manual_assignment" : "employee_policy_assignment", entityId: assignment.id, employeeId, policyId: desired.policyId, policyRuleId: desired.winningRuleId ?? undefined, categoryId: desired.categoryId, action: transition.operation === "UPDATE_VERSION" ? "ASSIGNMENT_VERSION_UPDATED" : "ASSIGNMENT_CREATED", ...(previous ? { before: previous.toObject() } : {}), after: assignment.toObject(), ...(previous ? { changedFields: ["policyVersion", "categoryId", "source", "winningRuleId", "matchedRuleIds", "status", "effectiveFrom", "effectiveTo", "resolvedAt"] } : {}), reason, correlationId, reconciliationRunId, metadata: { ...(previous ? { previousAssignmentId: previous.id } : {}), conditionEvaluations: desired.conditionEvaluations, triggeredByUserId } }, session);
+        changes.push({ operation: transition.operation, policyId: desired.policyId, assignmentId: assignment.id, ...(previous ? { previousAssignmentId: previous.id } : {}) });
       }
       return changes;
     });
@@ -123,7 +78,7 @@ export const createPolicyReconciliationService = ({
     return { resolution, reconciliationRunId, changes: result };
   };
 
-  const createManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveFrom }: { businessId: string; employeeId: string; policyId: string; userId: string; businessMemberId: string; effectiveFrom: Date }) => {
+  const createManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveFrom }: CreateManualAssignmentInput) => {
     const [employee, policy] = await Promise.all([
       employeeRepository.findByIdAndBusiness(employeeId, businessId),
       repository.findPolicy(businessId, policyId),
@@ -159,7 +114,7 @@ export const createPolicyReconciliationService = ({
     return { assignment, created: true };
   };
 
-  const endManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveTo }: { businessId: string; employeeId: string; policyId: string; userId: string; businessMemberId: string; effectiveTo: Date }) => {
+  const endManualAssignment = async ({ businessId, employeeId, policyId, userId, businessMemberId, effectiveTo }: EndManualAssignmentInput) => {
     const existing = await repository.findActiveManualAssignment(businessId, employeeId, policyId);
     if (!existing) throw createHttpError("Active manual assignment not found", 404);
     const assignment = await withTransaction(async (session) => {

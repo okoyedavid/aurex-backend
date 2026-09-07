@@ -3,7 +3,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createWarpDemoRouter } from "./warp-demo.route.js";
 
-const handlers = ["createSession", "mutate", "reset", "reconciliationRun", "overview", "employees", "employee", "employeePolicies", "explain", "categories", "policies", "policy", "audit"] as const;
+const handlers = ["createSession", "mutate", "reset", "reconciliationRun", "sessionEmployee", "sessionEmployeePolicies", "sessionExplain", "sessionAudit", "overview", "employees", "employee", "employeePolicies", "explain", "categories", "policies", "policy", "audit"] as const;
 const controller = Object.fromEntries(handlers.map((name) => [name, (_req: express.Request, res: express.Response) => res.json({ route: name })])) as any;
 
 const app = express();
