@@ -1,10 +1,10 @@
 # Aurex Backend
 
-Aurex is a multi-tenant business operations backend built with Express, TypeScript,
-MongoDB, and Mongoose. It demonstrates authentication, persistent sessions,
-permission-based business access, custom roles, delegated invitation approval,
-employee bank-account verification, notifications, audit trails, and defensive API
-design.
+Aurex is a multi-tenant business operations and access-governance backend built with
+Express, TypeScript, MongoDB, and Mongoose. It provides authentication with rotating
+sessions, permission-based business access, employee facts, policy resolution and
+temporal assignments, external-access desired state, GitHub integration, audit
+trails, and a constrained public Warp reconciliation demo.
 
 The repository is intended as a portfolio-quality backend and as the API for the
 Aurex frontend. Payment and invoice permissions exist in the role vocabulary, but
@@ -17,6 +17,8 @@ payment execution and invoice workflows are not implemented yet.
 - [Architecture](#architecture)
 - [Security Model](#security-model)
 - [Core Workflows](#core-workflows)
+- [Policy assignment and external access](#policy-assignment-and-external-access)
+- [Warp demo](#warp-demo)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Environment Variables](#environment-variables)
@@ -42,6 +44,9 @@ payment execution and invoice workflows are not implemented yet.
 - Profile, avatar, and user-preference updates.
 - Login, OTP, refresh, email-delivery, and sensitive-action rate limits.
 - Request metadata capture for security events.
+- Google OAuth login with state/nonce validation, automatic email verification, and
+  profile-image synchronization. Google login reuses the normal access-token,
+  rotating-refresh-session, cookie, and revocation flow.
 
 ### Multi-tenant businesses
 
@@ -119,6 +124,32 @@ payment execution and invoice workflows are not implemented yet.
 - Notifications reference their originating audit event.
 - Notification failure cannot roll back a successful membership operation.
 
+### Policy assignment and external access
+
+- Business-owned policies grouped into `ONE` and `MANY` categories.
+- Deterministic rule evaluation over department, employee type, groups, state, and
+  tenure, with human-readable explanations using separate expected and actual values.
+- Temporal assignment snapshots using half-open intervals:
+  `effectiveFrom <= asOf < effectiveTo`.
+- Reconciliation that ends and replaces assignments when their resolved snapshot
+  changes, while keeping repeated reconciliation idempotent.
+- Manual assignments and overrides remain distinct from automatic policy matches.
+- BullMQ/Redis reconciliation for employee, policy, category, business, and external
+  access changes.
+- GitHub desired-access reconciliation with managed-principal snapshots so identity
+  changes cannot orphan Aurex-managed access.
+
+### Warp demo
+
+- Public, rate-limited demo endpoints under `/api/demo/warp`.
+- Redis-backed isolated sessions with expiring state and mutation limits.
+- Only seeded demo resources and explicit employee-field/value combinations can be
+  changed.
+- Mutations enqueue the real policy reconciliation pipeline and return a run ID.
+- Frontends poll Redis-backed progress; no WebSockets or SSE are required.
+- Public demo reconciliation persists session-local employee, assignment, and audit
+  state and never performs privileged GitHub mutations.
+
 ## Technology
 
 | Concern | Technology |
@@ -130,11 +161,13 @@ payment execution and invoice workflows are not implemented yet.
 | ODM | Mongoose |
 | Validation | Zod |
 | Authentication | JSON Web Tokens and HTTP cookies |
+| OAuth | Google authorization-code flow; GitHub App integration for business access |
 | Password hashing | bcryptjs |
 | Email provider | Resend-compatible HTTP API |
 | Bank resolution | Paystack |
 | Tests | Vitest and Supertest |
 | Security middleware | Helmet, CORS, rate limiting, Mongo sanitization |
+| Queues and ephemeral state | BullMQ and Redis |
 
 ## Architecture
 
@@ -387,6 +420,8 @@ Copy-Item .env.example .env
 ```
 
 Set secure JWT secrets and a usable MongoDB connection before starting the server.
+Start Redis as well when using policy reconciliation or the Warp demo. Without
+`REDIS_URL`, the HTTP API still starts but queue-backed reconciliation is disabled.
 
 ## Environment Variables
 
@@ -416,6 +451,17 @@ Set secure JWT secrets and a usable MongoDB connection before starting the serve
 | `PAYSTACK_TEST_BANK_CODE` | Demo mode | Test bank code, normally `001`. |
 | `VERIFICATION_WORKER_INTERVAL_MS` | Yes | Employee verification polling interval; minimum 500 ms. |
 | `VERIFICATION_MAX_ATTEMPTS` | Yes | Maximum attempts for retryable bank verification. |
+| `REDIS_URL` | Policy/demo | Redis connection used by BullMQ and Warp demo sessions/progress. |
+| `POLICY_RECONCILIATION_CONCURRENCY` | No | Policy worker concurrency; defaults to `3`. |
+| `POLICY_RECONCILIATION_BATCH_SIZE` | No | Cursor batch size for broad reconciliations; defaults to `100`. |
+| `POLICY_RECONCILIATION_NIGHTLY_CRON` | No | Repair reconciliation schedule; defaults to `0 2 * * *`. |
+| `WARP_DEMO_BUSINESS_ID` | Warp demo | ObjectId of the dedicated synthetic demo business. |
+| `WARP_DEMO_SESSION_TTL_SECONDS` | Warp demo | Session lifetime, default `900` seconds. |
+| `WARP_DEMO_RUN_TTL_SECONDS` | Warp demo | Progress retention, default `1800` seconds. |
+| `WARP_DEMO_MAX_MUTATIONS_PER_SESSION` | Warp demo | Per-session mutation limit, default `12`. |
+| `GOOGLE_CLIENT_ID` | Google OAuth | Google OAuth client ID. Configure with the other Google variables. |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth | Google OAuth client secret. |
+| `GOOGLE_REDIRECT_URL` | Google OAuth | Callback URL, normally `/api/auth/google/callback`. |
 
 Never commit `.env`, production credentials, JWT secrets, or provider keys.
 
@@ -463,6 +509,13 @@ Start development mode:
 
 ```bash
 npm run dev
+```
+
+For local queue-backed development, start Redis on the configured URL before
+starting the API. For example, with Docker:
+
+```bash
+docker run --name aurex-redis -p 6379:6379 -d redis:7-alpine
 ```
 
 Compile TypeScript:
@@ -639,6 +692,53 @@ DELETE /api/me/sessions/:userSessionId
 
 Deleting `/api/me/sessions` revokes other sessions while retaining the current one.
 Deleting a specific current session clears authentication cookies.
+
+### Google login
+
+```http
+GET /api/auth/google
+GET /api/auth/google/callback?code=<code>&state=<state>
+```
+
+The first endpoint redirects to Google. The callback validates OAuth state and Google
+token claims, then creates or links the local account by Google subject/email. It
+sets the same access and rotating refresh cookies used by password login and
+redirects to `CLIENT_URL` with a `google` result query value. No separate email OTP
+is required for a verified Google email. Configure the exact callback URL in Google
+Cloud Console and `GOOGLE_REDIRECT_URL`.
+
+### Warp demo
+
+The demo is intentionally separate from authenticated business routes:
+
+```http
+GET  /api/demo/warp/overview
+GET  /api/demo/warp/employees
+GET  /api/demo/warp/employees/:employeeId
+GET  /api/demo/warp/employees/:employeeId/policies
+GET  /api/demo/warp/employees/:employeeId/explain
+GET  /api/demo/warp/policy-categories
+GET  /api/demo/warp/policies
+GET  /api/demo/warp/policies/:policyId
+GET  /api/demo/warp/audit
+
+POST /api/demo/warp/session
+POST /api/demo/warp/session/:sessionId/mutations
+POST /api/demo/warp/session/:sessionId/reset
+GET  /api/demo/warp/session/:sessionId/reconciliation/:runId
+GET  /api/demo/warp/session/:sessionId/employee
+GET  /api/demo/warp/session/:sessionId/employee/policies
+GET  /api/demo/warp/session/:sessionId/employee/explain
+GET  /api/demo/warp/session/:sessionId/audit
+```
+
+Session mutations accept an explicit employee alias and constrained values such as
+department `engineering`/`finance`, employee type `full_time`/`contractor`, state
+`california`/`new_york`, and Remote-group `member`/`not_member`. The mutation returns
+`{ runId, status: "queued" }`. Poll the reconciliation endpoint until its status is
+`completed`, `completed_with_warnings`, or `failed`, then refetch the session state.
+The demo uses a synthetic business configured by `WARP_DEMO_BUSINESS_ID` and does
+not execute real GitHub access changes.
 
 ### Businesses
 
@@ -996,6 +1096,14 @@ The API currently supports dashboard acceptance by authenticated invite ID. Toke
 inspection/acceptance routes should be added alongside the email worker if emailed
 links are intended to accept directly.
 
+### Policy reconciliation worker
+
+The BullMQ policy worker starts when `REDIS_URL` is configured. It processes employee
+and policy reconciliation, external desired-access synchronization, managed GitHub
+enforcement, broad business/category jobs, and Warp demo jobs. The Warp demo job
+uses the same policy resolver and assignment transition logic but a Redis-backed
+session sandbox and a no-op external-access boundary.
+
 ## Testing
 
 The test suite uses Vitest and Supertest. Route tests connect to the MongoDB URI from
@@ -1057,6 +1165,7 @@ src/
   modules/
     account/                          Profile, password, preferences, email changes
     auth/                             Register/login/refresh/verification/reset
+                                      Google OAuth callback and account linking
     session/                          Session listing and revocation
     users/                            User model and repository
     business/                         Business creation/list/context
@@ -1069,6 +1178,10 @@ src/
     email/                            Resend provider and email templates
     notification/                     Personal notification inbox
     audit-event/                      Security/business audit events
+    policy/                            Policy resolution, assignments, explanations
+    policy-rule/                       Rule conditions and evaluation
+    github-integration/                GitHub App, identity, grants, enforcement
+    warp-demo/                         Public demo sessions and progress polling
     application-error/                Server-side error persistence
     health/                           Health and status endpoints
   services/
@@ -1076,6 +1189,7 @@ src/
     ip-location.service.ts            MaxMind request enrichment
   types/                              Shared repository/request metadata types
   utils/                              JWT, hashing, cookies, transactions, errors
+  queues/                             BullMQ policy reconciliation and scheduler
 scripts/
   seed-system-roles.ts                Idempotent global-role seed
 tests/
@@ -1089,11 +1203,12 @@ tests/
 3. Download/provide the MaxMind database expected by `MAXMIND_DB_PATH`.
 4. Run the system-role seed against the deployment database.
 5. Build TypeScript.
-6. Start `dist/server.js`.
-7. Configure the frontend origin exactly in `CLIENT_URL`.
-8. Use HTTPS and secure cookie settings in production infrastructure.
-9. Configure a verified Resend sender before enabling real delivery.
-10. Use `PAYSTACK_VERIFICATION_MODE=live` only with valid production credentials.
+6. Start Redis for queue-backed features.
+7. Start `dist/server.js`.
+8. Configure the frontend origin exactly in `CLIENT_URL`.
+9. Use HTTPS and secure cookie settings in production infrastructure.
+10. Configure a verified Resend sender before enabling real delivery.
+11. Use `PAYSTACK_VERIFICATION_MODE=live` only with valid production credentials.
 
 The Render build script installs development dependencies, downloads MaxMind data,
 and compiles the application:
@@ -1111,15 +1226,17 @@ Potential extensions, not requirements for the current release:
 
 - Durable invitation email worker and resend/revoke routes.
 - Token-based invite landing/acceptance endpoints.
-- Policy assignment configuration UI and production Redis provisioning.
+- Policy assignment configuration UI.
 - Audited direct and bulk member-to-employee linking endpoints. Until these exist,
   existing members use the `EMPLOYEE` invitation workflow.
 - Ownership transfer and voluntary leave-business workflows.
 - Payment execution and approval flow.
 - Invoice management.
 - Business audit-log read endpoints.
-- Google/GitHub OAuth.
-- WebSocket or server-sent-event notification delivery.
+- Additional OAuth providers beyond the current Google login and GitHub App
+  integration.
+- WebSocket or server-sent-event notification delivery; current live progress uses
+  polling and BullMQ/Redis.
 
 These should be added only when they serve a concrete product goal; the current code
 already demonstrates the primary security, transaction, worker, and multi-tenant
